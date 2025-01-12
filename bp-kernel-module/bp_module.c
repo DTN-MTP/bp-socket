@@ -10,7 +10,7 @@
 #include <linux/semaphore.h>
 #include "bp_nl_gen.h"
 #include "af_bp.h"
-#include "../common.h"
+#include "../bp-common.h"
 
 static int __init bp_init(void)
 {

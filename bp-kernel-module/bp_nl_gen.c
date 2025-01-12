@@ -1,5 +1,5 @@
 #include <net/genetlink.h>
-#include "../common.h"
+#include "../bp-common.h"
 #include "bp_nl_gen.h"
 #include "af_bp.h"
 

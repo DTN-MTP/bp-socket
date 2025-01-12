@@ -36,7 +36,7 @@
 #include "daemon.h"
 #include "log.h"
 #include "bp.h"
-#include "../common.h"
+#include "../bp-common.h"
 
 struct thread_args
 {

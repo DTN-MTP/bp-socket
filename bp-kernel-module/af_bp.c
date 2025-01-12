@@ -3,7 +3,7 @@
 #include <net/sock.h>
 #include "af_bp.h"
 #include "bp_nl_gen.h"
-#include "../common.h"
+#include "../bp-common.h"
 
 HLIST_HEAD(bp_list);
 DEFINE_RWLOCK(bp_list_lock);

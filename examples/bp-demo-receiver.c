@@ -7,7 +7,7 @@
 #include <string.h>
 #include <signal.h>
 #include <errno.h>
-#include "common.h"
+#include "../bp-common.h"
 
 #define BUFFER_SIZE 1024
 #define AF_BP 28 // Custom socket family identifier

@@ -46,7 +46,7 @@
 #include "netlink.h"
 #include "log.h"
 #include "bp.h"
-#include "../common.h"
+#include "../bp-common.h"
 
 #define HASHMAP_NUM_BUCKETS 100
 
