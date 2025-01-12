@@ -54,3 +54,9 @@ dkms.conf
 # ION rc files and cloud-init files
 *.rc
 *.cfg
+
+.vscode
+bp-daemon/bp_daemon
+ion.log
+demo-app-bp-send
+demo-app-bp-recv

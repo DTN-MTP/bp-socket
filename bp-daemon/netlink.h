@@ -3,7 +3,7 @@
  * Copyright (C) 2017, Mark O'Neill <mark@markoneill.name>
  * All rights reserved.
  * https://owntrust.org
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -27,18 +27,13 @@
 #ifndef NETLINK_H
 #define NETLINK_H
 
-#include <event2/util.h>
-
-#include <netlink/genl/genl.h>
-#include <netlink/genl/ctrl.h>
-
 #include "daemon.h"
 
-int netlink_disconnect(struct nl_sock* sock);
-void netlink_recv(evutil_socket_t fd, short events, void *arg);
-void netlink_notify_kernel(tls_daemon_ctx_t* ctx, unsigned long id, int response);
-// void netlink_send_and_notify_kernel(tls_daemon_ctx_t* ctx, unsigned long id, char* data, unsigned int len);
-// void netlink_handshake_notify_kernel(tls_daemon_ctx_t* ctx, unsigned long id, int response);
-struct nl_sock* netlink_connect(tls_daemon_ctx_t* ctx);
+struct nl_sock *nl_connect_and_configure(tls_daemon_ctx_t *ctx);
+int nl_disconnect(struct nl_sock *sock);
+void nl_recvmsg(evutil_socket_t fd, short events, void *arg);
+int nl_recvmsg_cb(struct nl_msg *msg, void *arg);
+int nl_reply_bundle(struct nl_sock *netlink_sock, int netlink_family, unsigned int agent_id, char *payload);
+void *start_bp_recv_agent(void *arg);
 
 #endif

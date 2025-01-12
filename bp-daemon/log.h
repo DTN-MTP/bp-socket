@@ -3,7 +3,7 @@
  * Copyright (C) 2017, Mark O'Neill <mark@markoneill.name>
  * All rights reserved.
  * https://owntrust.org
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -30,7 +30,8 @@
 #include <time.h>
 #include <sys/socket.h>
 
-typedef enum log_level {
+typedef enum log_level
+{
 	LOG_DEBUG,
 	LOG_INFO,
 	LOG_WARNING,
@@ -38,18 +39,18 @@ typedef enum log_level {
 } log_level_t;
 
 #ifndef NO_LOG
-int log_init(const char* log_filename, log_level_t level);
-void log_printf(log_level_t level, const char* format, ...);
+int log_init(const char *log_filename, log_level_t level);
+void log_printf(log_level_t level, const char *format, ...);
 void log_printf_addr(struct sockaddr *addr);
 void log_close(void);
 #else
 #define noop
-#define log_init(X, Y)	((int)0)
+#define log_init(X, Y) ((int)0)
 #define log_printf(...) noop
 #define log_printf_addr(...) noop
 #define log_close() noop
 #endif
 
-int timeval_subtract(struct timeval* result, struct timeval* x, struct timeval* y);
+int timeval_subtract(struct timeval *result, struct timeval *x, struct timeval *y);
 
 #endif
