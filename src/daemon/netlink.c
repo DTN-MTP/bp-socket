@@ -1,30 +1,3 @@
-/*
- * TLS Wrapping Daemon - transparent TLS wrapping of plaintext connections
- * Copyright (C) 2017, Mark O'Neill <mark@markoneill.name>
- * All rights reserved.
- * https://owntrust.org
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions, and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
- * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
- * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
- * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
 #include <linux/limits.h>
 #include <event2/util.h>
 #include <netlink/socket.h>
@@ -36,7 +9,7 @@
 #include "daemon.h"
 #include "log.h"
 #include "bp.h"
-#include "../bp-common.h"
+#include "../include/bp.h"
 
 struct thread_args
 {
@@ -63,7 +36,7 @@ nl_connect_and_configure(tls_daemon_ctx_t *ctx)
 	genl_connect(sk);
 
 	/* Resolve the genl family. One family for both unicast and multicast. */
-	fam = genl_ctrl_resolve(sk, GENL_BP_NAME);
+	fam = genl_ctrl_resolve(sk, BP_GENL_NAME);
 	if (fam < 0)
 	{
 		log_printf(LOG_ERROR, "failed to resolve generic netlink family: %s\n",
@@ -74,7 +47,7 @@ nl_connect_and_configure(tls_daemon_ctx_t *ctx)
 	nl_socket_set_peer_port(sk, 0);
 
 	/* Resolve the multicast group. */
-	mcgrp = genl_ctrl_resolve_grp(sk, GENL_BP_NAME, GENL_BP_MC_GRP_NAME);
+	mcgrp = genl_ctrl_resolve_grp(sk, BP_GENL_NAME, BP_GENL_MC_GRP_NAME);
 	if (mcgrp < 0)
 	{
 		log_printf(LOG_ERROR, "failed to resolve generic netlink multicast group: %s\n",
@@ -105,13 +78,13 @@ int nl_recvmsg_cb(struct nl_msg *msg, void *arg)
 {
 	tls_daemon_ctx_t *ctx = (tls_daemon_ctx_t *)arg;
 	struct genlmsghdr *genlhdr = nlmsg_data(nlmsg_hdr(msg));
-	struct nlattr *attrs[GENL_BP_A_MAX + 1];
+	struct nlattr *attrs[BP_GENL_A_MAX + 1];
 	int err = 0;
 	char *payload, *eid;
 	int payload_size, eid_size;
 	unsigned long sockid;
 
-	err = nla_parse(attrs, GENL_BP_A_MAX, genlmsg_attrdata(genlhdr, 0), genlmsg_attrlen(genlhdr, 0), NULL);
+	err = nla_parse(attrs, BP_GENL_A_MAX, genlmsg_attrdata(genlhdr, 0), genlmsg_attrlen(genlhdr, 0), NULL);
 	if (err)
 	{
 		log_printf(LOG_ERROR, "unable to parse message: %s\n", strerror(-err));
@@ -120,37 +93,37 @@ int nl_recvmsg_cb(struct nl_msg *msg, void *arg)
 
 	switch (genlhdr->cmd)
 	{
-	case GENL_BP_CMD_FORWARD_BUNDLE:
-		if (!attrs[GENL_BP_A_SOCKID])
+	case BP_GENL_CMD_FORWARD_BUNDLE:
+		if (!attrs[BP_GENL_A_SOCKID])
 		{
 			log_printf(LOG_ERROR, "attribute missing from message\n");
 			return NL_SKIP;
 		}
-		sockid = nla_get_u64(attrs[GENL_BP_A_SOCKID]);
+		sockid = nla_get_u64(attrs[BP_GENL_A_SOCKID]);
 		log_printf(LOG_INFO, "Received setsockopt notification for socket ID %lu\n", sockid);
 
-		if (!attrs[GENL_BP_A_PAYLOAD])
+		if (!attrs[BP_GENL_A_PAYLOAD])
 		{
 			log_printf(LOG_ERROR, "attribute missing from message\n");
 			return NL_SKIP;
 		}
-		payload = nla_get_string(attrs[GENL_BP_A_PAYLOAD]);
+		payload = nla_get_string(attrs[BP_GENL_A_PAYLOAD]);
 		payload_size = strlen(payload) + 1;
 
-		if (!attrs[GENL_BP_A_EID])
+		if (!attrs[BP_GENL_A_EID])
 		{
 			log_printf(LOG_ERROR, "attribute missing from message\n");
 			return NL_SKIP;
 		}
-		eid = nla_get_string(attrs[GENL_BP_A_EID]);
+		eid = nla_get_string(attrs[BP_GENL_A_EID]);
 		eid_size = strlen(eid) + 1;
 
 		bp_send_cb(ctx, payload, payload_size, eid, eid_size);
 		break;
-	case GENL_BP_CMD_REQUEST_BUNDLE:
+	case BP_GENL_CMD_REQUEST_BUNDLE:
 		pthread_t thread;
 
-		if (!attrs[GENL_BP_A_AGENT_ID])
+		if (!attrs[BP_GENL_A_AGENT_ID])
 		{
 			log_printf(LOG_ERROR, "attribute missing from message\n");
 			return NL_SKIP;
@@ -162,7 +135,7 @@ int nl_recvmsg_cb(struct nl_msg *msg, void *arg)
 			log_printf(LOG_ERROR, "failed to allocate memory for thread arguments\n");
 			return -ENOMEM;
 		}
-		args->agent_id = nla_get_u32(attrs[GENL_BP_A_AGENT_ID]);
+		args->agent_id = nla_get_u32(attrs[BP_GENL_A_AGENT_ID]);
 		args->netlink_family = ctx->netlink_family;
 		args->netlink_sock = ctx->netlink_sock;
 
@@ -195,7 +168,7 @@ int nl_reply_bundle(struct nl_sock *netlink_sock, int netlink_family, unsigned i
 	}
 
 	/* Put the genl header inside message buffer */
-	void *hdr = genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, netlink_family, 0, 0, GENL_BP_CMD_REPLY_BUNDLE, GENL_BP_VERSION);
+	void *hdr = genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, netlink_family, 0, 0, BP_GENL_CMD_REPLY_BUNDLE, BP_GENL_VERSION);
 	if (!hdr)
 	{
 		log_printf(LOG_ERROR, "Failed to put the genl header inside message buffer\n");
@@ -203,13 +176,13 @@ int nl_reply_bundle(struct nl_sock *netlink_sock, int netlink_family, unsigned i
 	}
 
 	/* Put the string inside the message. */
-	err = nla_put_u32(msg, GENL_BP_A_AGENT_ID, agent_id);
+	err = nla_put_u32(msg, BP_GENL_A_AGENT_ID, agent_id);
 	if (err < 0)
 	{
 		log_printf(LOG_ERROR, "Failed to put the agent_id attribute\n");
 		return -err;
 	}
-	err = nla_put_string(msg, GENL_BP_A_PAYLOAD, payload);
+	err = nla_put_string(msg, BP_GENL_A_PAYLOAD, payload);
 	if (err < 0)
 	{
 		log_printf(LOG_ERROR, "Failed to put the payload attribute\n");

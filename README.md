@@ -1,4 +1,4 @@
-# BP-Kernel
+# Bp-socket
 
 BP-Kernel is a project designed to tackle a core DTN problem: providing a clean, interoperable API to facilitate application developers in sending data using the Bundle Protocol (BP).
 
@@ -11,16 +11,12 @@ BP-Kernel consists of two key components:
 
 ## Table of Contents
 
-- [BP-Kernel](#bp-kernel)
+- [Bp-socket](#bp-socket)
   - [Table of Contents](#table-of-contents)
   - [Architecture](#architecture)
   - [Outcome](#outcome)
+  - [Prerequisites](#prerequisites)
   - [Getting started](#getting-started)
-    - [Requirements](#requirements)
-    - [Overview of Available Commands](#overview-of-available-commands)
-    - [Setting Up Virtual Machines](#setting-up-virtual-machines)
-      - [VM1 Setup: `ion-node`](#vm1-setup-ion-node)
-      - [VM2 Setup: `ud3tn-node`](#vm2-setup-ud3tn-node)
 
 ## Architecture
 
@@ -55,102 +51,54 @@ It was demonstrated by transmitting bundles from a minimal user space applicatio
 
 ![Screenshot](./img/outcome.png)
 
+## Prerequisites
+
+- NFS
+- Libvirt (and QEMU)
+- [Vagrant](https://developer.hashicorp.com/vagrant/downloads)
+- [Vagrant Libvirt](https://vagrant-libvirt.github.io/vagrant-libvirt/)
+
 ## Getting started
 
-To set up the development environment outlined in the [Architecture](#architecture) section, we are going to prepare two virtual machines (VM1 and VM2). First, download the following image: [debian-12-generic-amd64.qcow2](https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2); Next, skip ahead to the [Setting Up Virtual Machines](#setting-up-virtual-machines) section to follow the instructions.
+To set up the development environment outlined in the [Architecture](#architecture) section, we are going to create two virtual machines (`ion-node` and `ud3tn-node`).
 
 > ⚠️ IMPORTANT:
-> It is highly recommended to use `ion-node` (VM1) as your development environment. This VM already includes the necessary tools and dependencies like `just`, `make`, and `python3-jinja2`. By working directly on VM1, you can simplify testing and avoid additional setup on your local machine.
+> It is highly recommended to use `ion-node` (VM1) as your development environment. This VM already includes the necessary tools and dependencies. By working directly on VM1, you can simplify testing and avoid additional setup on your local machine.
 
-### Requirements
-
-Here are the tools and packages required for development:
-
-- Local:
-  - **Tools**:
-    - [Just](https://github.com/casey/just)
-  - **Packages**:
-    - `python3-jinja2`
-- VM1 (`ion-node`):
-  - **Tools**:
-    - [Just](https://github.com/casey/just)
-  - **Packages**:
-    - `make`
-    - `pkg-config`
-    - `libnl-genl-3-dev`
-    - `libevent-dev`
-    - `build-essential`
-    - `python3-jinja2`
-- VM2 (`ud3tn-node`):
-  - **Packages**:
-    - `make`
-    - `build-essential`
-    - `libsqlite3-dev`
-    - `sqlite3`
-    - `python3.11-venv`
-
-### Overview of Available Commands
-
-| Action                                        | Command                                                | Note                                                                                                                                                                                            |
-| --------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Generate the content of an ION `host.rc` file | `just ion host <ADDRESS_SOURCE> <ADDRESS_DESTINATION>` | This command outputs the content to `stdout`. To save it to a file, append a redirection at the end (e.g., `> host.rc`).                                                                        |
-| Generate cloud-init config for `ud3tn-node`   | `just cloud-config ud3tn-node`                         | Before executing this command, ensure the environment variable `SSH_PUBLIC_KEY` is set with your public SSH key. Similar to the previous command, this command outputs the content to `stdout`. |
-| Generate cloud-init config for `ion-node`     | `just cloud-config ion-node`                           | Before executing this command, ensure the environment variable `SSH_PUBLIC_KEY` is set with your public SSH key. Similar to the previous command, this command outputs the content to `stdout`. |
-
-### Setting Up Virtual Machines
-
-#### VM1 Setup: `ion-node`
-
-1. [From Local] Automated Installation with QEMU/KVM and cloud-init
+1. Create VMs
 
 ```bash
-SSH_PUBLIC_KEY="ssh-rsa AAA..." just cloud-config ion-node > ion-node.debian.cfg
-
-virt-install --name ion-node \
-	--vcpus 4 --ram 2048 \
-	--disk size=10,backing_store=/path/to/debian-12-generic-amd64.qcow2 \
-  --cloud-init user-data=./ion-node.debian.cfg,disable=on \
-	--network bridge=virbr0 \
-	--osinfo debian12
+vagrant up
 ```
 
-2. [From Local] SSH inside `ion-node`
+2. SSH on `ion-node`, navigate to the `/vagrant` directory and see your `bp-socket` local repository
 
 ```bash
-ssh debian@<ADDRESS>
+vagrant ssh ion
+cd /vagrant
+ls
 ```
 
-3. [From `ion-node`] Switch to `root` user
+3. [From `ion-node`] Run ION, load `bp.ko` file and run dameon
 
 ```bash
 sudo -i
-```
 
-4. [From `ion-node`] Set Up ION and bp-kernel
-
-Navigate to the `bp-kernel` project directory and configure as follows:
-
-```bash
-cd /home/debian/bp-kernel
 export LD_LIBRARY_PATH="/usr/local/lib"
+ionstart -I /home/vagrant/host.rc
 
-# Start ION
-just ion host <ADDRESS_SOURCE> <ADDRESS_DESTINATION> > host.rc
-# Example: just ion host 192.168.122.140 192.168.122.182 > host.rc
-ionstart -I host.rc
-
-# Set up bp-kernel kernel module
-cd bp-sock
+# Load bp kernel module
+cd /vagrant/src/kernel
 make
 insmod bp.ko
 
-# Set up bp-daemon
-cd ../bp-daemon
+# Run daemon
+cd /vagrant/src/daemon
 make
 ./bp_daemon
 ```
 
-5. [From `ion-node`] Build and run user-space demo application
+4. [From `ion-node`] Run userspace demo application
 
 > ⚠️ IMPORTANT:
 > You need to open a new shell and wait for setting up µD3TN (VM2 Setup).
@@ -160,7 +108,7 @@ make
 <br>
 
 ```bash
-cd /home/debian/bp-kernel/examples
+cd /vagrant/tools
 
 gcc -o bp-demo-sender bp-demo-sender.c
 ./bp-demo-sender ipn:<HOST_ID_DESTINATION>.<AGENT_ID_DESTINATION>
@@ -173,7 +121,7 @@ gcc -o bp-demo-sender bp-demo-sender.c
 <br>
 
 ```bash
-cd /home/debian/bp-kernel/examples
+cd /vagrant/tools
 
 gcc -o bp-demo-receiver bp-demo-receiver.c
 ./bp-demo-receiver <AGENT_ID_SOURCE>
@@ -181,38 +129,17 @@ gcc -o bp-demo-receiver bp-demo-receiver.c
 ```
 </details>
 
-#### VM2 Setup: `ud3tn-node`
-
-1. [From Local] Automated Installation with QEMU/KVM and cloud-init
+5. SSH on `ud3tn-node`
 
 ```bash
-SSH_PUBLIC_KEY="ssh-rsa AAA..." just cloud-config ud3tn-node > ud3tn-node.debian.cfg
-
-virt-install --name ud3tn-node \
-	--vcpus 4 --ram 2048 \
-	--disk size=10,backing_store=/path/to/debian-12-generic-amd64.qcow2 \
-  --cloud-init user-data=./ud3tn-node.debian.cfg,disable=on \
-	--network bridge=virbr0 \
-	--osinfo debian12
+vagrant ssh ud3tn
 ```
 
-2. [From Local] SSH inside `ud3tn-node`
-
-```bash
-ssh debian@<ADDRESS>
-```
-
-3. [From `ud3tn-node`] Switch to `root` user
+6. [From `ud3tn-node`] Run ud3tn
 
 ```bash
 sudo -i
-```
-
-4. [From `ud3tn-node`] Start µD3TN
-
-```bash
-cd /home/debian/ud3tn
-
+cd /home/vagrant/ud3tn/
 build/posix/ud3tn \
     --allow-remote-config \
     --eid ipn:<HOST_ID_SOURCE>.0 \
@@ -225,7 +152,7 @@ build/posix/ud3tn \
 # --cla "tcpclv3:*,4556" -L 4
 ```
 
-5. [From `ud3tn-node`] Send and/or receive message
+7. [From `ud3tn-node`] Send and/or receive message
 
 > ⚠️ IMPORTANT:
 > You need to open a new shell.
@@ -235,7 +162,8 @@ build/posix/ud3tn \
 <br>
 
 ```bash
-cd /home/debian/ud3tn
+sudo -i
+cd /home/vagrant/ud3tn/
 
 source .venv/bin/activate
 python3 tools/aap2/aap2_receive.py --agentid <AGENT_ID_SOURCE> --socket ./ud3tn.aap2.socket.2
@@ -250,7 +178,8 @@ python3 tools/aap2/aap2_receive.py --agentid <AGENT_ID_SOURCE> --socket ./ud3tn.
 <br>
 
 ```bash
-cd /home/debian/ud3tn
+sudo -i
+cd /home/vagrant/ud3tn/
 
 source .venv/bin/activate
 

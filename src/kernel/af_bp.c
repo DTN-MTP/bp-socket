@@ -2,8 +2,8 @@
 #include <linux/kernel.h>
 #include <net/sock.h>
 #include "af_bp.h"
-#include "bp_nl_gen.h"
-#include "../bp-common.h"
+#include "bp_genl.h"
+#include "../include/bp.h"
 
 HLIST_HEAD(bp_list);
 DEFINE_RWLOCK(bp_list_lock);

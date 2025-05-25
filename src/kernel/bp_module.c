@@ -8,11 +8,12 @@
 #include <linux/fs.h>
 #include <net/sock.h>
 #include <linux/semaphore.h>
-#include "bp_nl_gen.h"
+#include "bp_genl.h"
 #include "af_bp.h"
-#include "../bp-common.h"
+#include "../include/bp.h"
 
-static int __init bp_init(void)
+static int __init
+bp_init(void)
 {
     int ret;
     int rc;
