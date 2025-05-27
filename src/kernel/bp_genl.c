@@ -1,18 +1,18 @@
 #include <net/genetlink.h>
-#include "../bp-common.h"
-#include "bp_nl_gen.h"
+#include "../include/bp.h"
+#include "bp_genl.h"
 #include "af_bp.h"
 
 static struct genl_ops genl_ops[] = {
 	// {
-	// 	.cmd = GENL_BP_CMD_FORWARD_BUNDLE,
+	// 	.cmd = BP_GENL_CMD_FORWARD_BUNDLE,
 	// 	.flags = GENL_ADMIN_PERM,
 	// 	.policy = nla_policy,
 	// 	.doit = fail_doit,
 	// 	.dumpit = NULL,
 	// },
 	{
-		.cmd = GENL_BP_CMD_REPLY_BUNDLE,
+		.cmd = BP_GENL_CMD_REPLY_BUNDLE,
 		.flags = GENL_ADMIN_PERM,
 		.policy = nla_policy,
 		.doit = recv_reply_bundle_doit,
@@ -21,15 +21,15 @@ static struct genl_ops genl_ops[] = {
 
 /* Multicast groups for our family */
 static const struct genl_multicast_group genl_mcgrps[] = {
-	{.name = GENL_BP_MC_GRP_NAME},
+	{.name = BP_GENL_MC_GRP_NAME},
 };
 
 /* Generic Netlink family */
 struct genl_family genl_fam = {
 	.module = THIS_MODULE,
-	.name = GENL_BP_NAME,
-	.version = GENL_BP_VERSION,
-	.maxattr = GENL_BP_A_MAX,
+	.name = BP_GENL_NAME,
+	.version = BP_GENL_VERSION,
+	.maxattr = BP_GENL_A_MAX,
 	.ops = genl_ops,
 	.n_ops = ARRAY_SIZE(genl_ops),
 	.mcgrps = genl_mcgrps,
@@ -61,7 +61,7 @@ int send_bundle_doit(u64 sockid, char *payload, int payload_size, char *eid, int
 	}
 
 	/* Put the Generic Netlink header */
-	hdr = genlmsg_put(msg, 0, 0, &genl_fam, 0, GENL_BP_CMD_FORWARD_BUNDLE);
+	hdr = genlmsg_put(msg, 0, 0, &genl_fam, 0, BP_GENL_CMD_FORWARD_BUNDLE);
 	if (!hdr)
 	{
 		pr_err("failed to create genetlink header\n");
@@ -70,21 +70,21 @@ int send_bundle_doit(u64 sockid, char *payload, int payload_size, char *eid, int
 	}
 
 	/* And the message */
-	if ((ret = nla_put_string(msg, GENL_BP_A_PAYLOAD, payload)))
+	if ((ret = nla_put_string(msg, BP_GENL_A_PAYLOAD, payload)))
 	{
 		pr_err("failed to create message string\n");
 		genlmsg_cancel(msg, hdr);
 		nlmsg_free(msg);
 		goto out;
 	}
-	if ((ret = nla_put_string(msg, GENL_BP_A_EID, eid)))
+	if ((ret = nla_put_string(msg, BP_GENL_A_EID, eid)))
 	{
 		pr_err("failed to create message string\n");
 		genlmsg_cancel(msg, hdr);
 		nlmsg_free(msg);
 		goto out;
 	}
-	if ((ret = nla_put_u64_64bit(msg, GENL_BP_A_SOCKID, sockid, 0)))
+	if ((ret = nla_put_u64_64bit(msg, BP_GENL_A_SOCKID, sockid, 0)))
 	{
 		pr_err("failed to create message string\n");
 		genlmsg_cancel(msg, hdr);
@@ -121,7 +121,7 @@ int notify_deamon_doit(u32 agent_id, int port_id)
 	}
 
 	/* Put the Generic Netlink header */
-	hdr = genlmsg_put(msg, 0, 0, &genl_fam, 0, GENL_BP_CMD_REQUEST_BUNDLE);
+	hdr = genlmsg_put(msg, 0, 0, &genl_fam, 0, BP_GENL_CMD_REQUEST_BUNDLE);
 	if (!hdr)
 	{
 		pr_err("failed to create genetlink header\n");
@@ -130,7 +130,7 @@ int notify_deamon_doit(u32 agent_id, int port_id)
 	}
 
 	/* And the message */
-	if ((ret = nla_put_u32(msg, GENL_BP_A_AGENT_ID, agent_id)))
+	if ((ret = nla_put_u32(msg, BP_GENL_A_AGENT_ID, agent_id)))
 	{
 		pr_err("failed to create message string\n");
 		genlmsg_cancel(msg, hdr);
@@ -161,20 +161,20 @@ int recv_reply_bundle_doit(struct sk_buff *skb, struct genl_info *info)
 
 	pr_info("TRIGGER: received message\n");
 
-	if (!info->attrs[GENL_BP_A_AGENT_ID])
+	if (!info->attrs[BP_GENL_A_AGENT_ID])
 	{
 		pr_err("attribute missing from message\n");
 		return -EINVAL;
 	}
-	agent_id = nla_get_u32(info->attrs[GENL_BP_A_AGENT_ID]);
+	agent_id = nla_get_u32(info->attrs[BP_GENL_A_AGENT_ID]);
 
-	if (!info->attrs[GENL_BP_A_PAYLOAD])
+	if (!info->attrs[BP_GENL_A_PAYLOAD])
 	{
 		pr_err("empty message received\n");
 		return -EINVAL;
 	}
-	payload = nla_data(info->attrs[GENL_BP_A_PAYLOAD]);
-	payload_len = nla_len(info->attrs[GENL_BP_A_PAYLOAD]);
+	payload = nla_data(info->attrs[BP_GENL_A_PAYLOAD]);
+	payload_len = nla_len(info->attrs[BP_GENL_A_PAYLOAD]);
 
 	pr_info("Message for agent %d: %s\n", agent_id, payload);
 
