@@ -7,14 +7,12 @@
 #include <string.h>
 #include <signal.h>
 #include <errno.h>
-#include "../include/bp.h
-"
+#include "../src/include/bp.h"
 
 #define BUFFER_SIZE 1024
 #define AF_BP 28 // Custom socket family identifier
 
-    void
-    handle_sigint(int sig)
+void handle_sigint(int sig)
 {
     printf("\nInterrupt received, shutting down...\n");
     exit(1);
