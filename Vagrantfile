@@ -7,8 +7,6 @@ Vagrant.configure("2") do |config|
   config.vm.provider :libvirt do |libvirt|
     libvirt.driver = "kvm"
     libvirt.uri = "qemu:///system"
-    libvirt.cpus = 2
-    libvirt.memory = 2048
   end
 
   config.vm.define "ion" do |ion|
@@ -16,13 +14,13 @@ Vagrant.configure("2") do |config|
       libvirt.cpus = 4
       libvirt.memory = 2048
     end
-    ion.vm.synced_folder ".", "/vagrant", type: "rsync", rsync__auto: true
+    ion.vm.synced_folder ".", "/vagrant", type: "rsync", rsync__auto: true, rsync__exclude: ".git/", rsync__args: ["--verbose", "--archive"]
     ion.vm.network :private_network, :ip => "192.168.50.10", :libvirt__netmask => "255.255.255.0"
     ion.vm.hostname = "ion-node"
     ion.vm.provision "shell", reboot: true, inline: <<-EOF
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get dist-upgrade -y
+    apt-get full-upgrade -y
     EOF
     ion.vm.provision "shell", inline: <<-EOF
     export DEBIAN_FRONTEND=noninteractive

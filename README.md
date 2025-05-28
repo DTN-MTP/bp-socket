@@ -17,9 +17,9 @@ Bp-socket consists of two key components:
   - [Outcome](#outcome)
   - [Prerequisites](#prerequisites)
   - [Getting started](#getting-started)
-    - [Capabilities — Sending and Receiving](#capabilities--sending-and-receiving)
-      - [Scenario 1 — Send from `ion-node` to `ud3tn-node`](#scenario-1--send-from-ion-node-to-ud3tn-node)
-      - [Scenario 2 — Send from `ud3tn-node` to `ion-node`](#scenario-2--send-from-ud3tn-node-to-ion-node)
+  - [Using the BP Socket capabilities (Sending and Receiving)](#using-the-bp-socket-capabilities-sending-and-receiving)
+    - [Scenario 1 — Send message from `ion-node` to `ud3tn-node`](#scenario-1--send-message-from-ion-node-to-ud3tn-node)
+    - [Scenario 2 — Send message from `ud3tn-node` to `ion-node`](#scenario-2--send-message-from-ud3tn-node-to-ion-node)
 
 ## Architecture
 
@@ -63,79 +63,108 @@ It was demonstrated by transmitting bundles from a minimal user space applicatio
 
 ## Getting started
 
-To set up the development environment outlined in the [Architecture](#architecture) section, we are going to create two virtual machines (`ion-node` and `ud3tn-node`).
+To set up the development environment described in the [Architecture](#architecture) section, you will launch two virtual machines: (`ion-node` and `ud3tn-node`).
 
 > ⚠️ IMPORTANT:
 > It is highly recommended to use `ion-node` (VM1) as your development environment. This VM already includes the necessary tools and dependencies. By working directly on VM1, you can simplify testing and avoid additional setup on your local machine.
 
-1. Create VMs
+1. Create the virtual machines
+
+Start both VMs with:
 
 ```bash
 vagrant up
 ```
 
-2. Enable `rsync-auto` to sync automatically your `bp-socket` folder on the host machine to the guest machine
+2. Enable automatic file synchronization on `ion-node`
+
+To keep your local `bp-socket` project synced with the `/vagrant` directory on `ion-node`, run:
    
 ```bash
 vagrant rsync-auto
 ```
 
-3. SSH on `ion-node`, navigate to the `/vagrant` directory and see your `bp-socket` local project
+> Make sure to keep this process running in a separate terminal during development.
+
+3. Preparing `ion-node` and `ud3tn-node`
+
+<details open>
+<summary><strong>ud3tn-node</strong></summary>
+
+a) SSH into the VM and start the uD3TN process:
 
 ```bash
-vagrant ssh ion
-ls /vagrant
-```
-
-4. SSH on `ud3tn-node`, and run uD3TN
-
-```bash
-vagrant ssh ud3tn
-sudo -i
+vagrant ssh -c "sudo -i" ud3tn
 cd /home/vagrant/ud3tn/
+
 build/posix/ud3tn \
     --allow-remote-config \
     --eid ipn:20.0 \
     --aap2-socket ./ud3tn.aap2.socket.2 \
     --cla "tcpclv3:*,4556" -L 4
+```
 
-# Add outgoing contact to ION node
+b) Then, in another terminal, add an outgoing contact to the ION node:
+
+```bash
+vagrant ssh -c "sudo -i" ud3tn
+
+cd /home/vagrant/ud3tn/
+source .venv/bin/activate
 python3 tools/aap2/aap2_config.py \
   --socket ./ud3tn.aap2.socket.2 \
   --schedule 1 86400 100000 \
   ipn:10.0 tcpclv3:192.168.50.10:4556
 ```
+</details>
 
-5. [From `ion-node`] Run ION, load `bp.ko` file and run dameon
+<details open>
+<summary><strong>ion-node</strong></summary>
+
+a) SSH into the VM and become root:
 
 ```bash
-sudo -i
+vagrant ssh -c "sudo -i" ion
+```
 
-# Run ION
+b) Start ION:
+
+```bash
 cd /vagrant/configs
 export LD_LIBRARY_PATH="/usr/local/lib"
 ionstart -I ./host.rc
+```
 
-# Load bp kernel module
+c) Build and insert the **Bundle Protocol (BP)** kernel module:
+
+```bash
 cd /vagrant/src/kernel
 make
 insmod bp.ko
+```
 
-# Run daemon
+d) Build and launch the userspace daemon:
+
+```bash
 cd /vagrant/src/daemon
 make
 ./bp_daemon
 ```
 
-### Capabilities — Sending and Receiving
+</details>
 
-#### Scenario 1 — Send from `ion-node` to `ud3tn-node`
+## Using the BP Socket capabilities (Sending and Receiving)
+
+This section demonstrates bidirectional message exchange between `ion-node` and `ud3tn-node` by opening sockets from the custom `AF_BP` socket family.
+
+### Scenario 1 — Send message from `ion-node` to `ud3tn-node`
 
 <details open>
 <summary><strong>ud3tn-node (receiver)</strong></summary>
 
 ```bash
-sudo -i
+vagrant ssh -c "sudo -i" ud3tn
+
 cd /home/vagrant/ud3tn/
 source .venv/bin/activate
 python3 tools/aap2/aap2_receive.py --agentid 2 --socket ./ud3tn.aap2.socket.2
@@ -146,21 +175,23 @@ python3 tools/aap2/aap2_receive.py --agentid 2 --socket ./ud3tn.aap2.socket.2
 <summary><strong>ion-node (sender)</strong></summary>
 
 ```bash
-cd /vagrant/tools
+vagrant ssh ion
 
+cd /vagrant/tools
 gcc -o bp-demo-sender bp-demo-sender.c
 ./bp-demo-sender ipn:20.2
 ```
 </details>
 
-#### Scenario 2 — Send from `ud3tn-node` to `ion-node`
+### Scenario 2 — Send message from `ud3tn-node` to `ion-node`
 
 <details open>
 <summary><strong>ion-node (receiver)</strong></summary>
 
 ```bash
-cd /vagrant/tools
+vagrant ssh ion
 
+cd /vagrant/tools
 gcc -o bp-demo-receiver bp-demo-receiver.c
 ./bp-demo-receiver 2
 ```
@@ -170,7 +201,8 @@ gcc -o bp-demo-receiver bp-demo-receiver.c
 <summary><strong>ud3tn-node (sender)</strong></summary>
   
 ```bash
-sudo -i
+vagrant ssh -c "sudo -i" ud3tn
+
 cd /home/vagrant/ud3tn/
 source .venv/bin/activate
 python3 tools/aap2/aap2_send.py --agentid 2 --socket ./ud3tn.aap2.socket.2 ipn:10.2 "Hello from ud3tn!" -v
