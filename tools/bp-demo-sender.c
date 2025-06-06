@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include "../src/include/bp.h" 
 
 #define PORT 12345
 
@@ -19,6 +20,8 @@ int main(int argc, char *argv[])
         printf("Usage: %s <argument>\n", argv[0]);
         return EXIT_FAILURE;
     }
+
+
 
     // Create a socket
     sockfd = socket(AF_BP, SOCK_DGRAM, 0);
@@ -35,10 +38,16 @@ int main(int argc, char *argv[])
     // sa.sin_port = htons(PORT); // Replace with your port number
 
     // with plain sockaddr (maybe introduce a struct sockaddr_bp ??)
-    struct sockaddr eid_addr;
-    eid_addr.sa_family = AF_BP;
-    strncpy(eid_addr.sa_data, argv[1], sizeof(eid_addr.sa_data));
-    eid_addr.sa_data[sizeof(eid_addr.sa_data) - 1] = '\0';
+    struct sockaddr_bp eid_addr;
+    eid_addr.bp_family = AF_BP;
+
+    if (1+ strlen(argv[1]) > sizeof(eid_addr.eid_str)) {
+        perror("EID is too long") ; 
+        return EXIT_FAILURE ; 
+    }
+
+    strncpy(eid_addr.eid_str, argv[1], sizeof(eid_addr.eid_str));
+    eid_addr.eid_str[sizeof(eid_addr.eid_str) - 1] = '\0';
 
     // Send a message
     const char *message = "Hello!";
@@ -50,7 +59,7 @@ int main(int argc, char *argv[])
         close(sockfd);
         return EXIT_FAILURE;
     }
-
+    
     printf("Message sent successfully: %s\n", message);
 
     // Clean up

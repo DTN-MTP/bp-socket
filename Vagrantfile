@@ -6,7 +6,7 @@ Vagrant.configure("2") do |config|
 
   config.vm.provider :libvirt do |libvirt|
     libvirt.driver = "kvm"
-    libvirt.uri = "qemu:///system"
+    libvirt.uri = "qemu:///system"  
   end
 
   config.vm.define "ion" do |ion|

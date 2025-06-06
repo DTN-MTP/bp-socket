@@ -191,9 +191,9 @@ gcc -o bp-demo-sender bp-demo-sender.c
 ```bash
 vagrant ssh ion
 
-cd /vagrant/tools
+cd /vagrant/bp-socket/tools
 gcc -o bp-demo-receiver bp-demo-receiver.c
-./bp-demo-receiver 2
+./bp-demo-receiver ipn:10.2
 ```
 </details>
 

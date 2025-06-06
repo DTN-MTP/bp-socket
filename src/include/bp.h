@@ -51,7 +51,7 @@ static const struct nla_policy nla_policy[BP_GENL_A_MAX + 1] = {
 struct sockaddr_bp
 {
     sa_family_t bp_family;
-    u_int8_t bp_agent_id;
+    char eid_str[126];
 };
 
 #endif
