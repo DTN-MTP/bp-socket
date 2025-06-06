@@ -3,6 +3,7 @@
 #include <net/sock.h>
 #include "af_bp.h"
 #include "bp_genl.h"
+#include <linux/string.h>
 #include "../include/bp.h"
 
 HLIST_HEAD(bp_list);
@@ -82,6 +83,163 @@ out:
     return rc;
 }
 
+
+enum bp_eid_scheme {
+    UNKNOWN_SCHEME = -1,
+    IPN,
+};
+
+
+enum bp_eid_scheme parse_eid_scheme(char* cursor, int eid_size) {
+    if (eid_size == 3 && strncmp(cursor, "ipn", 3) == 0) {
+        return IPN;
+    }
+    // Add more schemes here
+
+    return UNKNOWN_SCHEME;
+}
+
+int char_count_before_bounded(char* cursor, char target, int *remaining) {
+    char* start = cursor;
+    char* end = cursor + *remaining;
+
+    while (cursor < end && *cursor != target && *cursor != '\0') {
+        cursor++;
+    }
+
+    if (cursor < end && *cursor == target) {
+        int read = cursor - start ;
+        *remaining -= (read+1) ;
+        return read ;
+    }
+
+    return -1 ;
+}
+
+int char_count_before_term(char* cursor, int *remaining) {
+    char* start = cursor;
+    char* end = cursor + *remaining;
+    while ( *cursor != '\0' && cursor < end){
+        cursor++;
+    }
+
+    if (*cursor == '\0') {
+        int read = cursor - start ;
+        *remaining -= read ;
+        return read ;
+    }
+
+    return -1 ;
+}
+
+// Verify if string contains only numbers
+int is_all_digits(const char *str) {
+    if (str == NULL) return 1; // invalid
+
+    int i = 0;
+    size_t len = strlen(str);
+
+    while (i < len) {
+        if (!isdigit(str[i])) {
+            return 1;  //invalid
+        }
+        i++;
+    }
+    return 0; // valid
+}
+
+
+// Verify the eid validation syntax : ipn:<nodeId>.<serviceId>
+int test_eid_validation(char *eid_str) {
+    // To make sure that we do not surpass the allocated space in the memo
+    if (strlen(eid_str) + 1 >= 126) {  // Fix: use actual size instead of sizeof
+        pr_err("Error: EID is too long\n");
+        return -1;
+    }
+
+    // To make sure that eid_str != NULL
+    if (eid_str == NULL) {
+        pr_err("Error: NULL EID string\n");
+        return -1;
+    }
+
+    int remaining = strlen(eid_str);
+    char *cursor = eid_str;  // Fix: declare and initialize cursor
+
+    int double_point_pos = char_count_before_bounded(cursor, ':', &remaining);
+    if (double_point_pos == -1) {
+        pr_err("Error: EID must contain ':'\n");
+        return -1;
+    }
+
+    enum bp_eid_scheme eid_type = parse_eid_scheme(eid_str, double_point_pos);
+    if (eid_type != IPN) {
+        pr_err("Error: Unsupported EID scheme\n");
+        return -1;
+    }
+
+    cursor += double_point_pos + 1;
+
+    int point_pos = char_count_before_bounded(cursor, '.', &remaining);  // Fix: use cursor
+    if (point_pos == -1) {
+        pr_err("Error: No dot found in EID\n");
+        return -1;
+    }
+
+    // Extract and validate node_id
+    size_t node_id_len = point_pos;
+    char node_id[node_id_len + 1];
+    strncpy(node_id, cursor, node_id_len);
+    node_id[node_id_len] = '\0';
+
+    if (is_all_digits(node_id) != 0) {
+        pr_err("Error: node_id should contain only digits\n");  // Fix: pr_err
+        return -1;
+    }
+
+    cursor += point_pos + 1;
+    int endpos = char_count_before_term(cursor, &remaining);
+    if (endpos == -1) {
+        pr_err("Error: Invalid service_id\n");
+        return -1;
+    }
+
+    // Extract and validate service_id
+    size_t service_id_len = endpos;
+    char service_id[service_id_len + 1];
+    strncpy(service_id, cursor, service_id_len);
+    service_id[service_id_len] = '\0';
+
+    if (is_all_digits(service_id) != 0) {
+        pr_err("Error: service_id should contain only digits\n");  // Fix: pr_err
+        return -1;
+    }
+
+    return 0;  // Success
+}
+
+
+// Returns the agent id from the eid
+uint8_t get_agent_id(const char *eid_str) {
+    if (test_eid_validation((char *)eid_str) != 0) {
+        return 0;
+    }
+
+    const char *dot_pos = strchr(eid_str, '.');
+    if (!dot_pos) return 0;
+
+    unsigned long agent_id;
+    int ret = kstrtoul(dot_pos + 1, 10, &agent_id);
+
+    if (ret != 0 || agent_id > 255) {
+        pr_err("Agent ID %lu out of range (0-255)\n", agent_id);
+        return 0;
+    }
+
+    return (uint8_t)agent_id ;
+}
+
+
 int bp_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 {
     struct sock *iter_sk, *sk = sock->sk;
@@ -102,9 +260,13 @@ int bp_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
         rc = -EAFNOSUPPORT;
         goto out;
     }
-    if (addr->bp_agent_id < 1)
+
+    u_int8_t service_id = get_agent_id(addr->eid_str) ;
+    // Rest of the code was updated : addr->bp_agent_id became service_id
+
+    if (service_id < 1)
     {
-        pr_err("bp_bind: invalid agent ID %d (must be >= 1)\n", addr->bp_agent_id);
+        pr_err("bp_bind: invalid agent ID %d (must be >= 1)\n", service_id);
         rc = -EINVAL;
         goto out;
     }
@@ -113,10 +275,10 @@ int bp_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
     sk_for_each(iter_sk, &bp_list)
     {
         iter_bp = bp_sk(iter_sk);
-        if (iter_bp->bp_agent_id == addr->bp_agent_id)
+        if (iter_bp->bp_agent_id == service_id)
         {
             rc = -EADDRINUSE;
-            pr_err("bp_bind: agent %d already bound\n", addr->bp_agent_id);
+            pr_err("bp_bind: agent %d already bound\n", service_id);
             read_unlock_bh(&bp_list_lock);
             goto out;
         }
@@ -124,15 +286,14 @@ int bp_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
     read_unlock_bh(&bp_list_lock);
 
     bp = bp_sk(sk);
-
     lock_sock(sk);
-    bp->bp_agent_id = addr->bp_agent_id;
+    bp->bp_agent_id = service_id;
     write_lock_bh(&bp_list_lock);
     sk_add_node(sk, &bp_list);
     write_unlock_bh(&bp_list_lock);
     release_sock(sk);
 
-    pr_info("bp_bind: socket bound to agent %d\n", addr->bp_agent_id);
+    pr_info("bp_bind: socket bound to agent %d\n", service_id);
 out:
     return rc;
 }
@@ -162,19 +323,43 @@ int bp_release(struct socket *sock)
 
 int bp_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 {
-    struct sockaddr *addr;
+    pr_info("bp_sendmsg : entered the function here !!!!!") ; 
+    struct sockaddr_bp *addr;
     char *eid;
     void *payload;
     int eid_size;
     u32 sockid;
     int ret = 0;
 
-    addr = (struct sockaddr *)msg->msg_name;
-    eid = addr->sa_data;
-    eid_size = strlen(addr->sa_data) + 1;
+    if (!msg) {
+        pr_err("bp_sendmsg: msg is NULL\n");
+        ret = -EINVAL;
+        goto out;
+    }
 
-    pr_info("bp_sendmsg: entering function 2.0\n");
+    if (!msg->msg_name) {
+        pr_err("bp_sendmsg: msg_name is NULL\n");
+        ret = -EINVAL;
+        goto out;
+    }
 
+        // ✅ Add size check
+    if (msg->msg_namelen < sizeof(struct sockaddr_bp)) {
+        pr_err("bp_sendmsg: msg_namelen too short: %d\n", msg->msg_namelen);
+        ret = -EINVAL;
+        goto out;
+    }
+
+
+
+    addr = (struct sockaddr_bp *)msg->msg_name;
+    eid = addr->eid_str;
+    eid_size = strlen(addr->eid_str) + 1;
+
+
+
+
+    
     payload = kmalloc(size, GFP_KERNEL);
     if (!payload)
     {
