@@ -5,7 +5,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include "../src/include/bp.h" 
+#include "../src/include/bp.h"
 
 #define PORT 12345
 
@@ -41,13 +41,14 @@ int main(int argc, char *argv[])
     struct sockaddr_bp eid_addr;
     eid_addr.bp_family = AF_BP;
 
-    if (1+ strlen(argv[1]) > sizeof(eid_addr.eid_str)) {
-        perror("EID is too long") ; 
-        return EXIT_FAILURE ; 
+    // Verify that the eid does not surpass the allocated space for it
+    // Accepting maximum 125 characters + null term
+    if (1 + strlen(argv[1]) > sizeof(eid_addr.eid_str)) {
+        perror("EID is too long") ;
+        return EXIT_FAILURE ;
     }
 
     strncpy(eid_addr.eid_str, argv[1], sizeof(eid_addr.eid_str));
-    eid_addr.eid_str[sizeof(eid_addr.eid_str) - 1] = '\0';
 
     // Send a message
     const char *message = "Hello!";
@@ -59,7 +60,7 @@ int main(int argc, char *argv[])
         close(sockfd);
         return EXIT_FAILURE;
     }
-    
+
     printf("Message sent successfully: %s\n", message);
 
     // Clean up

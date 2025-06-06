@@ -79,7 +79,7 @@ vagrant up
 2. Enable automatic file synchronization on `ion-node`
 
 To keep your local `bp-socket` project synced with the `/vagrant` directory on `ion-node`, run:
-   
+
 ```bash
 vagrant rsync-auto
 ```
@@ -191,15 +191,15 @@ gcc -o bp-demo-sender bp-demo-sender.c
 ```bash
 vagrant ssh ion
 
-cd /vagrant/bp-socket/tools
+cd /vagrant/tools
 gcc -o bp-demo-receiver bp-demo-receiver.c
 ./bp-demo-receiver ipn:10.2
 ```
 </details>
 
-<details open> 
+<details open>
 <summary><strong>ud3tn-node (sender)</strong></summary>
-  
+
 ```bash
 vagrant ssh -c "sudo -i" ud3tn
 
