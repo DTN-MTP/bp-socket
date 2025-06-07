@@ -276,7 +276,7 @@ int bp_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 
     // If we parse the service id, the eid is valid
     int service_id = get_service_id(addr->eid_str);
-    if (!payload)
+    if (service_id < 0)
     {
         pr_err("bp_sendmsg: Invalid EID\n");
         ret = -EINVAL;
