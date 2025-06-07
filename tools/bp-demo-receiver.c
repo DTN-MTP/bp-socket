@@ -54,7 +54,7 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE ;
     }
 
-    strcpy(addr_bp.eid_str, argv[1]) ;
+    strcpy(addr_bp.eid_str, argv[1]);
 
     if (bind(sfd, (struct sockaddr *)&addr_bp, sizeof(addr_bp)) == -1)
     {

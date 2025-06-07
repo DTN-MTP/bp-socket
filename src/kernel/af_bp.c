@@ -142,10 +142,10 @@ int str_read_uint_bounded(const char* str, size_t len) {
     return result;
 }
 
-int ipn_eid_parse(char* cursor, int remaining, u) {
+int ipn_eid_parse(char* cursor, int remaining) {
 
     // read until .
-    int dotpos = char_count_before_bounded(cursor, '.', &remaining);
+    int dotpos = str_find_char_bounded(cursor, '.', &remaining);
     int node_id = str_read_uint_bounded(cursor, dotpos);
     if (node_id < 0) {
         pr_err("bp_bind: invalid node id\n");
@@ -154,7 +154,7 @@ int ipn_eid_parse(char* cursor, int remaining, u) {
 
     cursor += dotpos + 1;
 
-    int endpos = char_count_before_term(cursor, &remaining);
+    int endpos = str_find_term_bounded(cursor, &remaining);
     int service_id = str_read_uint_bounded(cursor, endpos);
     if (service_id < 0) {
         pr_err("bp_bind: invalid agent id\n");
@@ -166,17 +166,17 @@ int ipn_eid_parse(char* cursor, int remaining, u) {
 }
 
 int get_service_id(const char *eid_str) {
-
+    int remaining = sizeof(((struct sockaddr_bp *)0)->eid_str);
     char *cursor = eid_str;
-    int colonpos = char_count_before_bounded(cursor, ':', &remaining);
+    int colonpos = str_find_char_bounded(cursor, ':', &remaining);
     enum bp_eid_scheme eid_type = parse_eid_scheme(cursor, colonpos);
-
+    cursor += colonpos + 1;
     switch (eid_type) {
         case IPN:
-            return ipn_get_service_parse(cursor, remaining);
+            return ipn_eid_parse(cursor, remaining);
         default:
-            printf("EID unknown\n");
-            return;
+            pr_err("EID unknown\n");
+            return -1;
             break;
     }
 }
