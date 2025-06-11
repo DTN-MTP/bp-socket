@@ -1,0 +1,39 @@
+## begin ionadmin
+1 30 'host.ionconfig'
+s
+
+a contact +1 +86400 30 30 100000
+a contact +1 +86400 30 10 100000
+a contact +1 +86400 10 30 100000
+a contact +1 +86400 10 10 100000
+a contact +1 +86400 30 20 100000
+a contact +1 +86400 20 30 100000
+
+a range +1 +86400 30 30 1
+a range +1 +86400 30 10 1
+a range +1 +86400 10 30 1
+a range +1 +86400 10 10 1
+a range +1 +86400 30 20 1
+a range +1 +86400 20 30 1
+
+m production 1000000
+m consumption 1000000
+## end ionadmin
+
+## begin bpadmin
+1
+a scheme ipn 'ipnfw' 'ipnadminep'
+a endpoint ipn:30.0 q
+a endpoint ipn:30.1 q
+a endpoint ipn:30.2 q
+a protocol tcp 1400 100
+a induct tcp 192.168.50.30:4556 tcpcli
+a outduct tcp 192.168.50.10:4556 tcpclo
+a outduct tcp 192.168.50.20:4556 tcpclo
+s
+## end bpadmin
+
+## begin ipnadmin
+a plan 10 tcp/192.168.50.10:4556
+a plan 20 tcp/192.168.50.20:4556
+## end ipnadmin

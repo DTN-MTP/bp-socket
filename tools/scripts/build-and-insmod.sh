@@ -6,4 +6,4 @@ make
 if lsmod | grep -q "^bp"; then
 rmmod -f bp
 fi
-insmod bp.ko    
+insmod bp.ko

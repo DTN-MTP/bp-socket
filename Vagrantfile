@@ -6,7 +6,7 @@ Vagrant.configure("2") do |config|
 
   config.vm.provider :libvirt do |libvirt|
     libvirt.driver = "kvm"
-    libvirt.uri = "qemu:///system"  
+    libvirt.uri = "qemu:///system"
   end
 
   config.vm.define "ion" do |ion|
@@ -25,7 +25,7 @@ Vagrant.configure("2") do |config|
     ion.vm.provision "shell", inline: <<-EOF
     export DEBIAN_FRONTEND=noninteractive
     apt install -y curl git ca-certificates make pkg-config libnl-genl-3-dev libevent-dev build-essential linux-headers-$(uname -r)
-    
+
     cd /home/vagrant
     wget -q https://github.com/nasa-jpl/ION-DTN/archive/refs/tags/ion-open-source-4.1.3.tar.gz
     tar -zxf ion-open-source-4.1.3.tar.gz
@@ -47,7 +47,7 @@ Vagrant.configure("2") do |config|
     apt-get update
     apt-get install -y curl git curl ca-certificates make build-essential libsqlite3-dev sqlite3 python3.11-venv
 
-    git clone --recursive https://gitlab.com/d3tn/ud3tn.git	
+    git clone --recursive https://gitlab.com/d3tn/ud3tn.git
     cd ud3tn
     make posix -j8
     make virtualenv

@@ -46,14 +46,14 @@ int main(int argc, char *argv[])
     printf("Socket created.\n");
     agent_id = atoi(argv[1]);
     addr_bp.bp_family = AF_BP;
-    
+
     // Verify that the eid does not surpass the allocated space for it
     // Accepting maximum 125 characters
     if (1+ strlen(argv[1]) >= sizeof(addr_bp.eid_str)) {
         perror("EID is too long") ;
         return EXIT_FAILURE ;
     }
-    
+
     strcpy(addr_bp.eid_str, argv[1]) ; // Ajoute automatique le \0
     addr_bp.eid_str[sizeof(addr_bp.eid_str)-1 ] = '\0'; // \0 de limite
 
