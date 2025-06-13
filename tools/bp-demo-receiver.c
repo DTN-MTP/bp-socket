@@ -30,7 +30,7 @@ int main(int argc, char *argv[])
 
     if (argc < 2)
     {
-        printf("Usage: %s <agent_id>\n", argv[0]);
+        printf("Usage: %s <eid>\n", argv[0]);
         return EXIT_FAILURE;
     }
 
@@ -44,10 +44,18 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
     printf("Socket created.\n");
-
     agent_id = atoi(argv[1]);
     addr_bp.bp_family = AF_BP;
-    addr_bp.bp_agent_id = agent_id;
+
+    // Verify that the eid does not surpass the allocated space for it
+    // Accepting maximum 125 characters + null term
+    if (1 + strlen(argv[1]) >= sizeof(addr_bp.eid_str)) {
+        perror("EID is too long") ;
+        return EXIT_FAILURE ;
+    }
+
+    strcpy(addr_bp.eid_str, argv[1]);
+
     if (bind(sfd, (struct sockaddr *)&addr_bp, sizeof(addr_bp)) == -1)
     {
         perror("Failed to bind socket");
