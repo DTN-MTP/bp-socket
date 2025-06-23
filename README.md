@@ -17,6 +17,8 @@ Bp-socket consists of two key components:
   - [Outcome](#outcome)
   - [Prerequisites](#prerequisites)
   - [Getting started](#getting-started)
+    - [Linux Setup (Vagrant)](#linux-setup-vagrant)
+    - [MacOS Setup (Multipass)](#macos-setup-multipass)
   - [Using the BP Socket capabilities (Sending and Receiving)](#using-the-bp-socket-capabilities-sending-and-receiving)
     - [Scenario 1 — Send message from `ion-node` to `ud3tn-node`](#scenario-1--send-message-from-ion-node-to-ud3tn-node)
     - [Scenario 2 — Send message from `ud3tn-node` to `ion-node`](#scenario-2--send-message-from-ud3tn-node-to-ion-node)
@@ -68,6 +70,8 @@ To set up the development environment described in the [Architecture](#architect
 > ⚠️ IMPORTANT:
 > It is highly recommended to use `ion-node` (VM1) as your development environment. This VM already includes the necessary tools and dependencies. By working directly on VM1, you can simplify testing and avoid additional setup on your local machine.
 
+### Linux Setup (Vagrant)
+
 1. Create the virtual machines
 
 Start both VMs with:
@@ -116,6 +120,7 @@ python3 tools/aap2/aap2_config.py \
   --schedule 1 86400 100000 \
   ipn:10.0 tcpclv3:192.168.50.10:4556
 ```
+
 </details>
 
 <details open>
@@ -153,6 +158,54 @@ make
 
 </details>
 
+### MacOS Setup (Multipass)
+
+If you're using macOS, you can reproduce the virtual lab setup described above using [Multipass](https://canonical.com/multipass) and `cloud-init` instead of Vagrant. This approach uses QEMU with manual network configuration and provides an easy way to launch both `ion-node` and `ud3tn-node`.
+
+1. Launch `ion-node`
+
+```zsh
+multipass launch 24.04 \
+  --name ion-node \
+  --cpus 4 \
+  --memory 2G \
+  --disk 10G \
+  --timeout 1800 \
+  --mount $PWD:/vagrant \
+  --network name=en0,mode=manual,mac="52:54:00:4b:ab:cd" \
+  --cloud-init configs/cloud-init/ion.cloud-config.cfg
+```
+
+This command:
+
+- Assigns a static MAC address to the VM
+- Mounts the project directory at `/vagrant` inside the VM
+- Applies the `cloud-init` config to provision packages, IP setup, and kernel modules
+
+2. Launch `ud3tn-node`
+
+```zsh
+multipass launch 24.04 \
+  --name ud3tn-node \
+  --cpus 2 \
+  --memory 1G \
+  --disk 10G \
+  --timeout 1800 \
+  --network name=en0,mode=manual,mac="52:54:00:4b:ab:cf" \
+  --cloud-init configs/cloud-init/ud3tn.cloud-config.cfg
+```
+
+3. Interact with the VMs
+
+Use the following commands to connect:
+
+```zsh
+multipass shell ion-node
+multipass shell ud3tn-node
+```
+
+> 💡 **Note**: You can check assigned IPs using `ip a` inside the VMs. Your cloud-init file should have configured static IP addresses (192.168.50.10 for `ion-node` and 192.168.50.20 for `ud3tn-node`) on interface enp0s1.
+
 ## Using the BP Socket capabilities (Sending and Receiving)
 
 This section demonstrates bidirectional message exchange between `ion-node` and `ud3tn-node` by opening sockets from the custom `AF_BP` socket family.
@@ -169,6 +222,7 @@ cd /home/vagrant/ud3tn/
 source .venv/bin/activate
 python3 tools/aap2/aap2_receive.py --agentid 2 --socket ./ud3tn.aap2.socket.2
 ```
+
 </details>
 
 <details open>
@@ -181,6 +235,7 @@ cd /vagrant/tools
 gcc -o bp-demo-sender bp-demo-sender.c
 ./bp-demo-sender ipn:20.2
 ```
+
 </details>
 
 ### Scenario 2 — Send message from `ud3tn-node` to `ion-node`
@@ -195,6 +250,7 @@ cd /vagrant/tools
 gcc -o bp-demo-receiver bp-demo-receiver.c
 ./bp-demo-receiver ipn:10.2
 ```
+
 </details>
 
 <details open>
@@ -207,5 +263,24 @@ cd /home/vagrant/ud3tn/
 source .venv/bin/activate
 python3 tools/aap2/aap2_send.py --agentid 2 --socket ./ud3tn.aap2.socket.2 ipn:10.2 "Hello from ud3tn!" -v
 ```
+
 </details>
 
+multipass launch 24.04 \
+ --name ion-node \
+ --cpus 4 \
+ --memory 2G \
+ --disk 10G \
+ --timeout 1800 \
+ --mount $PWD:/vagrant \
+ --network name=en0,mode=manual,mac="52:54:00:4b:ab:cd" \
+ --cloud-init configs/cloud-init/ion.cloud-config.cfg
+
+multipass launch 24.04 \
+ --name ud3tn-node \
+ --cpus 2 \
+ --memory 1G \
+ --disk 10G \
+ --timeout 1800 \
+ --network name=en0,mode=manual,mac="52:54:00:4b:ab:cf" \
+ --cloud-init configs/cloud-init/ud3tn.cloud-config.cfg
