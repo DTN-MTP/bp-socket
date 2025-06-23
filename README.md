@@ -208,7 +208,7 @@ SSH into `ion-node`:
 # SSH into ion-node before
 sudo -i
 
-#  Start ION
+# a) Start ION
 cd /bp-socket/configs
 export LD_LIBRARY_PATH="/usr/local/lib"
 ionstart -I ./host.rc
