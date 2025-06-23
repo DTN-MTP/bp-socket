@@ -14,7 +14,7 @@ Vagrant.configure("2") do |config|
       libvirt.cpus = 4
       libvirt.memory = 2048
     end
-    ion.vm.synced_folder ".", "/vagrant", type: "rsync", rsync__auto: true, rsync__exclude: ".git/", rsync__args: ["--verbose", "--archive"]
+    ion.vm.synced_folder ".", "/bp-socket", type: "rsync", rsync__auto: true, rsync__exclude: ".git/", rsync__args: ["--verbose", "--archive"]
     ion.vm.network :private_network, :ip => "192.168.50.10", :libvirt__netmask => "255.255.255.0"
     ion.vm.hostname = "ion-node"
     ion.vm.provision "shell", reboot: true, inline: <<-EOF
@@ -26,7 +26,7 @@ Vagrant.configure("2") do |config|
     export DEBIAN_FRONTEND=noninteractive
     apt install -y curl git ca-certificates make pkg-config libnl-genl-3-dev libevent-dev build-essential linux-headers-$(uname -r)
 
-    cd /home/vagrant
+    cd /opt
     wget -q https://github.com/nasa-jpl/ION-DTN/archive/refs/tags/ion-open-source-4.1.3.tar.gz
     tar -zxf ion-open-source-4.1.3.tar.gz
     cd ION-DTN-ion-open-source-4.1.3
@@ -47,6 +47,7 @@ Vagrant.configure("2") do |config|
     apt-get update
     apt-get install -y curl git curl ca-certificates make build-essential libsqlite3-dev sqlite3 python3.11-venv
 
+    cd /opt/
     git clone --recursive https://gitlab.com/d3tn/ud3tn.git
     cd ud3tn
     make posix -j8
