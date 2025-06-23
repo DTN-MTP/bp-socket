@@ -174,6 +174,7 @@ a) SSH into `ud3tn-node` and start the uD3TN process:
 ```bash
 # SSH into ud3tn-node before
 sudo -i
+
 cd /opt/ud3tn/
 build/posix/ud3tn \
     --allow-remote-config \
@@ -187,6 +188,7 @@ b) Then, in another terminal, add an outgoing contact to the ION node:
 ```bash
 # SSH into ud3tn-node before
 sudo -i
+
 cd /opt/ud3tn/
 source .venv/bin/activate
 python3 tools/aap2/aap2_config.py \
@@ -197,29 +199,26 @@ python3 tools/aap2/aap2_config.py \
 
 </details>
 
-<details close>
+<details open>
 <summary><strong>ion-node</strong></summary>
 
-a) SSH into `ion-node` and Start ION:
+SSH into `ion-node`:
 
 ```bash
 # SSH into ion-node before
+sudo -i
+
+#  Start ION
 cd /bp-socket/configs
 export LD_LIBRARY_PATH="/usr/local/lib"
 ionstart -I ./host.rc
-```
 
-b) Build and insert the **Bundle Protocol (BP)** kernel module:
-
-```bash
+# b) Build and insert the **Bundle Protocol (BP)** kernel module:
 cd /bp-socket/src/kernel
 make
 insmod bp.ko
-```
 
-c) Build and launch the userspace daemon:
-
-```bash
+# c) Build and launch the userspace daemon:
 cd /bp-socket/src/daemon
 make
 ./bp_daemon
@@ -238,8 +237,8 @@ This section demonstrates bidirectional message exchange between `ion-node` and 
 
 ```bash
 # SSH into ud3tn-node before
-
 sudo -i
+
 cd /opt/ud3tn/
 source .venv/bin/activate
 python3 tools/aap2/aap2_receive.py --agentid 2 --socket ./ud3tn.aap2.socket.2
@@ -252,7 +251,6 @@ python3 tools/aap2/aap2_receive.py --agentid 2 --socket ./ud3tn.aap2.socket.2
 
 ```bash
 # SSH into ion-node before
-
 cd /bp-socket/tools
 gcc -o bp-demo-sender bp-demo-sender.c
 ./bp-demo-sender ipn:20.2
@@ -267,7 +265,6 @@ gcc -o bp-demo-sender bp-demo-sender.c
 
 ```bash
 # SSH into ion-node before
-
 cd /bp-socket/tools
 gcc -o bp-demo-receiver bp-demo-receiver.c
 ./bp-demo-receiver ipn:10.2
@@ -280,8 +277,8 @@ gcc -o bp-demo-receiver bp-demo-receiver.c
 
 ```bash
 # SSH into ud3tn-node before
-
 sudo -i
+
 cd /opt/ud3tn/
 source .venv/bin/activate
 python3 tools/aap2/aap2_send.py --agentid 2 --socket ./ud3tn.aap2.socket.2 ipn:10.2 "Hello from ud3tn!" -v

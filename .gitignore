@@ -57,3 +57,6 @@ ion.log
 demo-app-bp-send
 demo-app-bp-recv
 .vagrant
+tools/bp-demo-sender
+tools/bp-demo-receiver
+src/daemon/bp_daemon
