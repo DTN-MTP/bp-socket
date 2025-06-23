@@ -357,7 +357,7 @@ int bp_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int flags)
         goto out_free_skb;
     }
 
-    if (copy_to_user(msg->msg_iter.iov->iov_base, skb->data, skb->len))
+    if (copy_to_iter(skb->data, skb->len, &msg->msg_iter) != skb->len)
     {
         pr_err("bp_recvmsg: failed to copy data to user space\n");
         ret = -EFAULT;
