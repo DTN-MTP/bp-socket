@@ -8,7 +8,7 @@
 
 #include "log.h"
 #include "daemon.h"
-#include "../include/bp.h"
+#include "../include/bp_socket.h"
 #include "bp_genl_handlers.h"
 #include "ion.h"
 
@@ -31,13 +31,13 @@ int handle_send_bundle(Daemon *daemon, struct nlattr **attrs)
 }
 int handle_request_bundle(Daemon *daemon, struct nlattr **attrs)
 {
-    if (!attrs[BP_GENL_A_AGENT_ID])
+    if (!attrs[BP_GENL_A_SERVICE_ID])
     {
-        log_error("Missing BP_GENL_A_AGENT_ID in REQUEST_BUNDLE");
+        log_error("Missing BP_GENL_A_SERVICE_ID in REQUEST_BUNDLE");
         return NL_SKIP;
     }
 
-    uint32_t service_id = nla_get_u32(attrs[BP_GENL_A_AGENT_ID]);
+    uint32_t service_id = nla_get_u32(attrs[BP_GENL_A_SERVICE_ID]);
     log_info("REQUEST_BUNDLE: Bundle request initiated (service ID %u)", service_id);
 
     struct thread_args *args = malloc(sizeof(struct thread_args));
@@ -91,9 +91,9 @@ int handle_deliver_bundle(struct thread_args *args)
 
     void *hdr = genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ,
                             args->netlink_family, 0, 0,
-                            BP_GENL_CMD_REPLY_BUNDLE, BP_GENL_VERSION);
+                            BP_GENL_CMD_DELIVER_BUNDLE, BP_GENL_VERSION);
     if (!hdr ||
-        nla_put_u32(msg, BP_GENL_A_AGENT_ID, args->service_id) < 0 ||
+        nla_put_u32(msg, BP_GENL_A_SERVICE_ID, args->service_id) < 0 ||
         nla_put_string(msg, BP_GENL_A_PAYLOAD, payload) < 0)
     {
         log_error("DELIVER_BUNDLE: Failed to construct Netlink reply");

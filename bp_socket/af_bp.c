@@ -1,10 +1,12 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <net/sock.h>
+#include <linux/string.h>
+
 #include "af_bp.h"
 #include "bp_genl.h"
-#include <linux/string.h>
-#include "../include/bp.h"
+#include "../include/bp_socket.h"
+#include "eid.h"
 
 HLIST_HEAD(bp_list);
 DEFINE_RWLOCK(bp_list_lock);
@@ -83,105 +85,6 @@ out:
     return rc;
 }
 
-
-enum bp_eid_scheme {
-    UNKNOWN_SCHEME = -1,
-    IPN,
-};
-
-enum bp_eid_scheme parse_eid_scheme(char* cursor, int eid_size) {
-    if (eid_size == 3 && strncmp(cursor, "ipn", 3) == 0) {
-        return IPN;
-    }
-    // Add more schemes here
-
-    return UNKNOWN_SCHEME;
-}
-
-int str_find_char_bounded(char* cursor, char target, int *remaining) {
-    char* start = cursor;
-    char* end = cursor + *remaining;
-
-    while (cursor < end && *cursor != target && *cursor != '\0') {
-        cursor++;
-    }
-
-    if (cursor < end && *cursor == target) {
-        int read = cursor - start ;
-        *remaining -= (read+1) ;
-        return read ;
-    }
-
-    return -1 ;
-}
-
-int str_find_term_bounded(char* cursor, int *remaining) {
-    char* start = cursor;
-    char* end = cursor + *remaining;
-    while ( *cursor != '\0' && cursor < end){
-        cursor++;
-    }
-
-    if (*cursor == '\0') {
-        int read = cursor - start ;
-        *remaining -= read ;
-        return read ;
-    }
-
-    return -1 ;
-}
-
-int str_read_uint_bounded(const char* str, size_t len) {
-    int result = 0;
-    for (size_t i = 0; i < len; i++) {
-        if(!isdigit(str[i])){
-            return -1;
-        }
-        result = result * 10 + (str[i] - '0');
-    }
-    return result;
-}
-
-int ipn_eid_parse(char* cursor, int remaining) {
-
-    // read until .
-    int dotpos = str_find_char_bounded(cursor, '.', &remaining);
-    int node_id = str_read_uint_bounded(cursor, dotpos);
-    if (node_id < 0) {
-        pr_err("bp_bind: invalid node id\n");
-        return -1;
-    }
-
-    cursor += dotpos + 1;
-
-    int endpos = str_find_term_bounded(cursor, &remaining);
-    int service_id = str_read_uint_bounded(cursor, endpos);
-    if (service_id < 0) {
-        pr_err("bp_bind: invalid agent id\n");
-        return -2;
-    }
-
-    pr_info("ipn_eid_parse: node %d and service %d\n", node_id, service_id);
-    return service_id;
-}
-
-int get_service_id(const char *eid_str) {
-    int remaining = sizeof(((struct sockaddr_bp *)0)->eid_str);
-    char *cursor = eid_str;
-    int colonpos = str_find_char_bounded(cursor, ':', &remaining);
-    enum bp_eid_scheme eid_type = parse_eid_scheme(cursor, colonpos);
-    cursor += colonpos + 1;
-    switch (eid_type) {
-        case IPN:
-            return ipn_eid_parse(cursor, remaining);
-        default:
-            pr_err("EID unknown\n");
-            return -1;
-            break;
-    }
-}
-
-
 int bp_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 {
     struct sock *iter_sk, *sk = sock->sk;
@@ -207,7 +110,7 @@ int bp_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 
     if (service_id < 1 || service_id > 255)
     {
-        pr_err("bp_bind: invalid agent ID %d (must be in [0, 255])\n", service_id);
+        pr_err("bp_bind: invalid service ID %d (must be in [0, 255])\n", service_id);
         rc = -EINVAL;
         goto out;
     }
@@ -216,10 +119,10 @@ int bp_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
     sk_for_each(iter_sk, &bp_list)
     {
         iter_bp = bp_sk(iter_sk);
-        if (iter_bp->bp_agent_id == service_id)
+        if (iter_bp->bp_service_id == service_id)
         {
             rc = -EADDRINUSE;
-            pr_err("bp_bind: agent %d already bound\n", service_id);
+            pr_err("bp_bind: service %d already bound\n", service_id);
             read_unlock_bh(&bp_list_lock);
             goto out;
         }
@@ -228,13 +131,13 @@ int bp_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 
     bp = bp_sk(sk);
     lock_sock(sk);
-    bp->bp_agent_id = service_id;
+    bp->bp_service_id = service_id;
     write_lock_bh(&bp_list_lock);
     sk_add_node(sk, &bp_list);
     write_unlock_bh(&bp_list_lock);
     release_sock(sk);
 
-    pr_info("bp_bind: socket bound to agent %d\n", service_id);
+    pr_info("bp_bind: socket bound to service %d\n", service_id);
 out:
     return rc;
 }
@@ -268,7 +171,7 @@ int bp_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
     char *eid;
     void *payload;
     int eid_size;
-    u32 sockid;
+    uintptr_t sockid;
     int ret = 0;
 
     addr = (struct sockaddr_bp *)msg->msg_name;
@@ -302,7 +205,7 @@ int bp_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
         goto clean;
     }
 
-    sockid = (u32)sock->sk->sk_socket;
+    sockid = (uintptr_t)sock->sk->sk_socket;
     send_bundle_doit(sockid, (char *)payload, size, eid, eid_size, 8443);
 
 clean:
@@ -317,12 +220,12 @@ int bp_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int flags)
 {
     struct sock *sk = sock->sk;
     struct bp_sock *bp = bp_sk(sk);
-    u32 agent_id = bp->bp_agent_id;
+    u32 service_id = bp->bp_service_id;
     struct sk_buff *skb;
     int ret;
 
     pr_info("bp_recvmsg: entering function 2.0\n");
-    notify_deamon_doit(bp->bp_agent_id, 8443);
+    request_bundle_doit(bp->bp_service_id, 8443);
 
     sock_hold(sk);
     lock_sock(sk);
@@ -342,12 +245,12 @@ int bp_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int flags)
     skb = skb_dequeue(&bp->queue);
     if (!skb)
     {
-        pr_info("bp_recvmsg: no messages in the queue for agent %d\n", agent_id);
+        pr_info("bp_recvmsg: no messages in the queue for service %d\n", service_id);
         ret = -EAGAIN;
         goto out_unlock;
     }
 
-    pr_info("bp_recvmsg: message dequeued for agent %d\n", agent_id);
+    pr_info("bp_recvmsg: message dequeued for service %d\n", service_id);
 
     if (skb->len > size)
     {

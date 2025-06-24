@@ -1,21 +1,21 @@
 #include <net/genetlink.h>
-#include "../include/bp.h"
+#include "../include/bp_socket.h"
 #include "bp_genl.h"
 #include "af_bp.h"
 
 static struct genl_ops genl_ops[] = {
 	// {
-	// 	.cmd = BP_GENL_CMD_FORWARD_BUNDLE,
+	// 	.cmd = BP_GENL_CMD_SEND_BUNDLE,
 	// 	.flags = GENL_ADMIN_PERM,
 	// 	.policy = nla_policy,
 	// 	.doit = fail_doit,
 	// 	.dumpit = NULL,
 	// },
 	{
-		.cmd = BP_GENL_CMD_REPLY_BUNDLE,
+		.cmd = BP_GENL_CMD_DELIVER_BUNDLE,
 		.flags = GENL_ADMIN_PERM,
 		.policy = nla_policy,
-		.doit = recv_reply_bundle_doit,
+		.doit = deliver_bundle_doit,
 		.dumpit = NULL,
 	}};
 
@@ -61,7 +61,7 @@ int send_bundle_doit(u64 sockid, char *payload, int payload_size, char *eid, int
 	}
 
 	/* Put the Generic Netlink header */
-	hdr = genlmsg_put(msg, 0, 0, &genl_fam, 0, BP_GENL_CMD_FORWARD_BUNDLE);
+	hdr = genlmsg_put(msg, 0, 0, &genl_fam, 0, BP_GENL_CMD_SEND_BUNDLE);
 	if (!hdr)
 	{
 		pr_err("failed to create genetlink header\n");
@@ -104,7 +104,7 @@ out:
 	return ret;
 }
 
-int notify_deamon_doit(u32 agent_id, int port_id)
+int request_bundle_doit(u32 service_id, int port_id)
 {
 	int ret = 0;
 	void *hdr;
@@ -130,7 +130,7 @@ int notify_deamon_doit(u32 agent_id, int port_id)
 	}
 
 	/* And the message */
-	if ((ret = nla_put_u32(msg, BP_GENL_A_AGENT_ID, agent_id)))
+	if ((ret = nla_put_u32(msg, BP_GENL_A_SERVICE_ID, service_id)))
 	{
 		pr_err("failed to create message string\n");
 		genlmsg_cancel(msg, hdr);
@@ -150,23 +150,23 @@ out:
 	return ret;
 }
 
-int recv_reply_bundle_doit(struct sk_buff *skb, struct genl_info *info)
+int deliver_bundle_doit(struct sk_buff *skb, struct genl_info *info)
 {
 	struct sock *sk;
 	struct bp_sock *bp;
-	u32 agent_id;
+	u32 service_id;
 	char *payload;
 	size_t payload_len;
 	struct sk_buff *new_skb;
 
 	pr_info("TRIGGER: received message\n");
 
-	if (!info->attrs[BP_GENL_A_AGENT_ID])
+	if (!info->attrs[BP_GENL_A_SERVICE_ID])
 	{
 		pr_err("attribute missing from message\n");
 		return -EINVAL;
 	}
-	agent_id = nla_get_u32(info->attrs[BP_GENL_A_AGENT_ID]);
+	service_id = nla_get_u32(info->attrs[BP_GENL_A_SERVICE_ID]);
 
 	if (!info->attrs[BP_GENL_A_PAYLOAD])
 	{
@@ -176,7 +176,7 @@ int recv_reply_bundle_doit(struct sk_buff *skb, struct genl_info *info)
 	payload = nla_data(info->attrs[BP_GENL_A_PAYLOAD]);
 	payload_len = nla_len(info->attrs[BP_GENL_A_PAYLOAD]);
 
-	pr_info("Message for agent %d: %s\n", agent_id, payload);
+	pr_info("Message for service %d: %s\n", service_id, payload);
 
 	new_skb = alloc_skb(payload_len, GFP_KERNEL);
 	if (!new_skb)
@@ -191,12 +191,12 @@ int recv_reply_bundle_doit(struct sk_buff *skb, struct genl_info *info)
 	{
 		bp = bp_sk(sk);
 
-		if (bp->bp_agent_id == agent_id)
+		if (bp->bp_service_id == service_id)
 		{
 
 			skb_queue_tail(&bp->queue, new_skb);
 			wake_up_interruptible(&bp->wait_queue);
-			pr_info("Payload queued successfully for agent: %d\n", bp->bp_agent_id);
+			pr_info("Payload queued successfully for agent: %d\n", bp->bp_service_id);
 			break;
 		}
 	}

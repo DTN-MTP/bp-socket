@@ -7,7 +7,7 @@
 #include <netlink/attr.h>
 
 #include "bp_genl.h"
-#include "../include/bp.h"
+#include "../include/bp_socket.h"
 #include "bp_genl_handlers.h"
 #include "daemon.h"
 #include "log.h"
@@ -77,7 +77,7 @@ int genl_bp_sock_recvmsg_cb(struct nl_msg *msg, void *arg)
 
 	switch (genlhdr->cmd)
 	{
-	case BP_GENL_CMD_FORWARD_BUNDLE:
+	case BP_GENL_CMD_SEND_BUNDLE:
 		return handle_send_bundle(daemon, attrs);
 	case BP_GENL_CMD_REQUEST_BUNDLE:
 		return handle_request_bundle(daemon, attrs);

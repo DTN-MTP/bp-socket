@@ -2,7 +2,7 @@
 
 Bp-socket is a project designed to tackle a core DTN problem: providing a clean, interoperable API to facilitate application developers in sending data using the Bundle Protocol (BP).
 
-The core objective of this project is to extend the Linux networking stack by introducing a new address family specifically for BP communication. The new address family, `BP_AF`, offers a protocol abstraction that aligns with the **Interplanetary Networking (IPN) Scheme Naming and Addressing**.
+The core objective of this project is to extend the Linux networking stack by introducing a new address family specifically for BP communication. The new address family, `AF_BP`, offers a protocol abstraction that aligns with the **Interplanetary Networking (IPN) Scheme Naming and Addressing**.
 
 Bp-socket consists of two key components:
 
@@ -30,7 +30,7 @@ Bp-socket consists of two key components:
 
 The resulting “BP Sockets” interface integrates with bundle protocol stacks in user space. Netlink IPC (Inter-Process Communication) coordinates kernel and user space interactions. The main elements of the architecture are described below.
 
-![Architecture](./docs/img/architecture.png)
+![Architecture](./Documentation/img/architecture.png)
 
 <details close>
 <summary>Application</summary>
@@ -57,7 +57,7 @@ Upon receiving a message, the BP Sockets Daemon in userspace retrieves the EID a
 
 It was demonstrated by transmitting bundles from a minimal user space application through the Linux kernel and ION to µD3TN using BP Sockets. The screenshot below shows the µD3TN log (the receiving BP node) on the top, the BP Sockets App sender on the bottom left, and the BP App receiver output on the bottom right.
 
-![Screenshot](./docs/img/outcome.png)
+![Screenshot](./Documentation/img/outcome.png)
 
 ## Prerequisites
 
@@ -214,12 +214,12 @@ export LD_LIBRARY_PATH="/usr/local/lib"
 ionstart -I ./host.rc
 
 # b) Build and insert the **Bundle Protocol (BP)** kernel module:
-cd /bp-socket/src/kernel
+cd /bp-socket/bp_socket
 make
 insmod bp.ko
 
 # c) Build and launch the userspace daemon:
-cd /bp-socket/src/daemon
+cd /bp-socket/daemon
 make
 ./bp_daemon
 ```
