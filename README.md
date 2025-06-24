@@ -2,7 +2,7 @@
 
 Bp-socket is a project designed to tackle a core DTN problem: providing a clean, interoperable API to facilitate application developers in sending data using the Bundle Protocol (BP).
 
-The core objective of this project is to extend the Linux networking stack by introducing a new address family specifically for BP communication. The new address family, `BP_AF`, offers a protocol abstraction that aligns with the **Interplanetary Networking (IPN) Scheme Naming and Addressing**.
+The core objective of this project is to extend the Linux networking stack by introducing a new address family specifically for BP communication. The new address family, `AF_BP`, offers a protocol abstraction that aligns with the **Interplanetary Networking (IPN) Scheme Naming and Addressing**.
 
 Bp-socket consists of two key components:
 
@@ -214,12 +214,12 @@ export LD_LIBRARY_PATH="/usr/local/lib"
 ionstart -I ./host.rc
 
 # b) Build and insert the **Bundle Protocol (BP)** kernel module:
-cd /bp-socket/src/kernel
+cd /bp-socket/bp_socket
 make
 insmod bp.ko
 
 # c) Build and launch the userspace daemon:
-cd /bp-socket/src/daemon
+cd /bp-socket/daemon
 make
 ./bp_daemon
 ```

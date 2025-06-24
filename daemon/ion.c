@@ -44,7 +44,7 @@ int bp_send_to_eid(char *payload, int payload_size, char *eid, int eid_size)
     return 1;
 }
 
-char *bp_recv_once(int agent_id)
+char *bp_recv_once(int service_id)
 {
     BpSAP txSap;
     BpDelivery dlv;
@@ -56,14 +56,14 @@ char *bp_recv_once(int agent_id)
     int nodeNbr = getOwnNodeNbr();
     vast len;
 
-    eid_size = snprintf(NULL, 0, "ipn:%d.%d", nodeNbr, agent_id) + 1;
+    eid_size = snprintf(NULL, 0, "ipn:%d.%d", nodeNbr, service_id) + 1;
     eid = malloc(eid_size);
     if (!eid)
     {
         log_error("Failed to allocate EID");
         return NULL;
     }
-    snprintf(eid, eid_size, "ipn:%d.%d", nodeNbr, agent_id);
+    snprintf(eid, eid_size, "ipn:%d.%d", nodeNbr, service_id);
 
     if (bp_open(eid, &txSap) < 0 || txSap == NULL)
     {

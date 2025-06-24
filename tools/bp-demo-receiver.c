@@ -25,7 +25,7 @@ int main(int argc, char *argv[])
     char buffer[80];
     struct iovec iov[1];
     struct msghdr *msg;
-    unsigned int agent_id;
+    unsigned int service_id;
     int ret = 0;
 
     if (argc < 2)
@@ -44,14 +44,15 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
     printf("Socket created.\n");
-    agent_id = atoi(argv[1]);
+    service_id = atoi(argv[1]);
     addr_bp.bp_family = AF_BP;
 
     // Verify that the eid does not surpass the allocated space for it
     // Accepting maximum 125 characters + null term
-    if (1 + strlen(argv[1]) >= sizeof(addr_bp.eid_str)) {
-        perror("EID is too long") ;
-        return EXIT_FAILURE ;
+    if (1 + strlen(argv[1]) >= sizeof(addr_bp.eid_str))
+    {
+        perror("EID is too long");
+        return EXIT_FAILURE;
     }
 
     strcpy(addr_bp.eid_str, argv[1]);

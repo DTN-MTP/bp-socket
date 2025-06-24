@@ -1,4 +1,4 @@
-bp-objs := bp_genl.o af_bp.o bp_module.o
+bp-objs := bp_genl.o af_bp.o bp_module.o eid.o
 obj-m += bp.o
 
 KDIR := /lib/modules/$(shell uname -r)/build
