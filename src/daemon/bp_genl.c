@@ -5,78 +5,62 @@
 #include <netlink/genl/ctrl.h>
 #include <netlink/genl/genl.h>
 #include <netlink/genl/family.h>
-#include "netlink.h"
+#include "bp_genl.h"
 #include "daemon.h"
+#include "ion.h"
 #include "log.h"
 #include "bp.h"
 #include "../include/bp.h"
 
-struct thread_args
+struct nl_sock *genl_bp_sock_init(Daemon *daemon)
 {
-	struct nl_sock *netlink_sock;
-	int netlink_family;
-	unsigned int agent_id;
-};
-
-struct nl_sock *
-nl_connect_and_configure(tls_daemon_ctx_t *ctx)
-{
-	int mcgrp, fam, ret;
-	struct nl_sock *sk;
-
-	sk = nl_socket_alloc();
+	struct nl_sock *sk = nl_socket_alloc();
 	if (!sk)
 	{
-		log_printf(LOG_ERROR, "failed to allocate socket\n");
+		log_error("Failed to allocate Netlink socket");
 		return NULL;
 	}
+
+	nl_socket_set_local_port(sk, daemon->nl_pid);
 	nl_socket_disable_seq_check(sk);
-	nl_socket_set_local_port(sk, ctx->port);
-	nl_socket_modify_cb(sk, NL_CB_VALID, NL_CB_CUSTOM, nl_recvmsg_cb, (void *)ctx);
-	genl_connect(sk);
+	nl_socket_modify_cb(sk, NL_CB_VALID, NL_CB_CUSTOM, genl_bp_sock_recvmsg_cb, daemon);
+	nl_socket_set_peer_port(sk, 0); // Send to kernel
 
-	/* Resolve the genl family. One family for both unicast and multicast. */
-	fam = genl_ctrl_resolve(sk, BP_GENL_NAME);
-	if (fam < 0)
+	int err = genl_connect(sk);
+	if (err < 0)
 	{
-		log_printf(LOG_ERROR, "failed to resolve generic netlink family: %s\n",
-				   strerror(-fam));
+		log_error("genl_connect() failed: %s", nl_geterror(err));
+		nl_socket_free(sk);
 		return NULL;
 	}
 
-	nl_socket_set_peer_port(sk, 0);
-
-	/* Resolve the multicast group. */
-	mcgrp = genl_ctrl_resolve_grp(sk, BP_GENL_NAME, BP_GENL_MC_GRP_NAME);
-	if (mcgrp < 0)
+	int family_id = genl_ctrl_resolve(sk, daemon->genl_bp_family_name);
+	if (family_id < 0)
 	{
-		log_printf(LOG_ERROR, "failed to resolve generic netlink multicast group: %s\n",
-				   strerror(-mcgrp));
+		log_error("Failed to resolve family '%s': %s",
+				  daemon->genl_bp_family_name, nl_geterror(family_id));
+		nl_socket_free(sk);
 		return NULL;
 	}
 
-	/* Join the multicast group. */
-	if ((ret = nl_socket_add_membership(sk, mcgrp) < 0))
-	{
-		log_printf(LOG_ERROR, "failed to join multicast group: %s\n", strerror(-ret));
-		return NULL;
-	}
-
-	ctx->netlink_sock = sk;
-	ctx->netlink_family = fam;
-
+	daemon->genl_bp_family_id = family_id;
 	return sk;
 }
 
-void nl_recvmsg(evutil_socket_t fd, short events, void *arg)
+void genl_bp_sock_close(Daemon *daemon)
 {
-	nl_recvmsgs_default((struct nl_sock *)arg);
-	return;
+	if (!daemon->genl_bp_sock)
+		return;
+
+	nl_socket_free(daemon->genl_bp_sock);
+	log_info("Netlink socket closed");
+
+	daemon->genl_bp_family_id = -1;
 }
 
-int nl_recvmsg_cb(struct nl_msg *msg, void *arg)
+int genl_bp_sock_recvmsg_cb(struct nl_msg *msg, void *arg)
 {
-	tls_daemon_ctx_t *ctx = (tls_daemon_ctx_t *)arg;
+	Daemon *daemon = (Daemon *)arg;
 	struct genlmsghdr *genlhdr = nlmsg_data(nlmsg_hdr(msg));
 	struct nlattr *attrs[BP_GENL_A_MAX + 1];
 	int err = 0;
@@ -87,7 +71,7 @@ int nl_recvmsg_cb(struct nl_msg *msg, void *arg)
 	err = nla_parse(attrs, BP_GENL_A_MAX, genlmsg_attrdata(genlhdr, 0), genlmsg_attrlen(genlhdr, 0), NULL);
 	if (err)
 	{
-		log_printf(LOG_ERROR, "unable to parse message: %s\n", strerror(-err));
+		log_error("unable to parse message: %s", strerror(-err));
 		return NL_SKIP;
 	}
 
@@ -96,15 +80,15 @@ int nl_recvmsg_cb(struct nl_msg *msg, void *arg)
 	case BP_GENL_CMD_FORWARD_BUNDLE:
 		if (!attrs[BP_GENL_A_SOCKID])
 		{
-			log_printf(LOG_ERROR, "attribute missing from message\n");
+			log_error("attribute missing from message");
 			return NL_SKIP;
 		}
 		sockid = nla_get_u64(attrs[BP_GENL_A_SOCKID]);
-		log_printf(LOG_INFO, "Received setsockopt notification for socket ID %lu\n", sockid);
+		log_info("Received notification for socket ID %lu", sockid);
 
 		if (!attrs[BP_GENL_A_PAYLOAD])
 		{
-			log_printf(LOG_ERROR, "attribute missing from message\n");
+			log_error("attribute missing from message");
 			return NL_SKIP;
 		}
 		payload = nla_get_string(attrs[BP_GENL_A_PAYLOAD]);
@@ -112,36 +96,36 @@ int nl_recvmsg_cb(struct nl_msg *msg, void *arg)
 
 		if (!attrs[BP_GENL_A_EID])
 		{
-			log_printf(LOG_ERROR, "attribute missing from message\n");
+			log_error("attribute missing from message");
 			return NL_SKIP;
 		}
 		eid = nla_get_string(attrs[BP_GENL_A_EID]);
 		eid_size = strlen(eid) + 1;
 
-		bp_send_cb(ctx, payload, payload_size, eid, eid_size);
+		bp_send_to_eid(payload, payload_size, eid, eid_size);
 		break;
 	case BP_GENL_CMD_REQUEST_BUNDLE:
 		pthread_t thread;
 
 		if (!attrs[BP_GENL_A_AGENT_ID])
 		{
-			log_printf(LOG_ERROR, "attribute missing from message\n");
+			log_error("attribute missing from message");
 			return NL_SKIP;
 		}
 
 		struct thread_args *args = malloc(sizeof(struct thread_args));
 		if (!args)
 		{
-			log_printf(LOG_ERROR, "failed to allocate memory for thread arguments\n");
+			log_error("failed to allocate memory for thread arguments");
 			return -ENOMEM;
 		}
 		args->agent_id = nla_get_u32(attrs[BP_GENL_A_AGENT_ID]);
-		args->netlink_family = ctx->netlink_family;
-		args->netlink_sock = ctx->netlink_sock;
+		args->netlink_family = daemon->genl_bp_family_id;
+		args->netlink_sock = daemon->genl_bp_sock;
 
 		if (pthread_create(&thread, NULL, start_bp_recv_agent, args) != 0)
 		{
-			fprintf(stderr, "Failed to create thread\n");
+			fprintf(stderr, "Failed to create thread");
 			free(args);
 			return -1;
 		}
@@ -149,9 +133,10 @@ int nl_recvmsg_cb(struct nl_msg *msg, void *arg)
 
 		break;
 	default:
-		log_printf(LOG_ERROR, "unrecognized command\n");
+		log_error("unrecognized command");
 		break;
 	}
+
 	return 0;
 }
 
@@ -163,7 +148,7 @@ int nl_reply_bundle(struct nl_sock *netlink_sock, int netlink_family, unsigned i
 	struct nl_msg *msg = nlmsg_alloc_size(msg_size + GENL_HDRLEN);
 	if (!msg)
 	{
-		log_printf(LOG_ERROR, "Failed to allocate payload\n");
+		log_error("Failed to allocate payload");
 		return -ENOMEM;
 	}
 
@@ -171,7 +156,7 @@ int nl_reply_bundle(struct nl_sock *netlink_sock, int netlink_family, unsigned i
 	void *hdr = genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, netlink_family, 0, 0, BP_GENL_CMD_REPLY_BUNDLE, BP_GENL_VERSION);
 	if (!hdr)
 	{
-		log_printf(LOG_ERROR, "Failed to put the genl header inside message buffer\n");
+		log_error("Failed to put the genl header inside message buffer");
 		return -EMSGSIZE;
 	}
 
@@ -179,13 +164,13 @@ int nl_reply_bundle(struct nl_sock *netlink_sock, int netlink_family, unsigned i
 	err = nla_put_u32(msg, BP_GENL_A_AGENT_ID, agent_id);
 	if (err < 0)
 	{
-		log_printf(LOG_ERROR, "Failed to put the agent_id attribute\n");
+		log_error("Failed to put the agent_id attribute");
 		return -err;
 	}
 	err = nla_put_string(msg, BP_GENL_A_PAYLOAD, payload);
 	if (err < 0)
 	{
-		log_printf(LOG_ERROR, "Failed to put the payload attribute\n");
+		log_error("Failed to put the payload attribute");
 		return -err;
 	}
 
@@ -217,21 +202,21 @@ void *start_bp_recv_agent(void *arg)
 	eid = malloc(eid_size);
 	if (!eid)
 	{
-		log_printf(LOG_ERROR, "Failed to allocate memory");
+		log_error("Failed to allocate memory");
 		goto out;
 	}
 	snprintf(eid, eid_size, "ipn:%d.%d", nodeNbr, args->agent_id);
-	log_printf(LOG_INFO, "bp_recv_agent: Agent started with EID: %s\n", eid);
+	log_info("bp_recv_agent: Agent started with EID: %s", eid);
 
 	if (bp_open(eid, &txSap) < 0 || txSap == NULL)
 	{
-		log_printf(LOG_ERROR, "Failed to open source endpoint.\n");
+		log_error("Failed to open source endpoint.");
 		goto out;
 	}
 
 	if (bp_receive(txSap, &dlv, BP_BLOCKING) < 0)
 	{
-		log_printf(LOG_ERROR, "Bundle reception failed.\n");
+		log_error("Bundle reception failed.");
 		goto out;
 	}
 
@@ -243,7 +228,7 @@ void *start_bp_recv_agent(void *arg)
 		payload = malloc((size_t)payload_size);
 		if (!payload)
 		{
-			log_printf(LOG_ERROR, "Failed to allocate memory for payload.\n");
+			log_error("Failed to allocate memory for payload.");
 			sdr_exit_xn(sdr);
 			goto out;
 		}
@@ -254,27 +239,27 @@ void *start_bp_recv_agent(void *arg)
 		if (sdr_end_xn(sdr) < 0 || len < 0)
 		{
 			sdr_exit_xn(sdr);
-			log_printf(LOG_ERROR, "Can't handle delivery. len = %d\n", len);
+			log_error("Can't handle delivery. len = %d", len);
 			free(payload);
 			goto out;
 		}
 
-		log_printf(LOG_INFO, "bp_recv_agent: receive bundle\n");
+		log_info("bp_recv_agent: receive bundle");
 
 		nl_reply_bundle(args->netlink_sock, args->netlink_family, args->agent_id, payload);
 
-		log_printf(LOG_INFO, "bp_recv_agent: sending reply bundle to kernel\n");
+		log_info("bp_recv_agent: sending reply bundle to kernel");
 
 		free(payload);
 		break;
 	default:
-		log_printf(LOG_INFO, "No Bp Payload\n");
+		log_info("No Bp Payload");
 		break;
 	}
 
 	bp_release_delivery(&dlv, 0);
 out:
-	log_printf(LOG_INFO, "bp_recv_agent: Agent terminated with EID: %s\n", eid);
+	log_info("bp_recv_agent: Agent terminated with EID: %s", eid);
 
 	bp_close(txSap);
 	free(eid);

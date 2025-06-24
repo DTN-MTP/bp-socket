@@ -60,3 +60,4 @@ demo-app-bp-recv
 tools/bp-demo-sender
 tools/bp-demo-receiver
 src/daemon/bp_daemon
+src/daemon/.*
