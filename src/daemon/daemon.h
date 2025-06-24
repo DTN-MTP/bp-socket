@@ -1,6 +1,7 @@
 #ifndef DAEMON_H
 #define DAEMON_H
 
+#include <netlink/socket.h>
 #include <event2/event.h>
 
 typedef struct Daemon

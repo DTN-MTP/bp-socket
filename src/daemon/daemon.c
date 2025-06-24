@@ -1,25 +1,10 @@
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <errno.h>
-#include <signal.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <sys/un.h>
-#include <netdb.h>
-#include <assert.h>
 #include <event2/event.h>
-#include <event2/listener.h>
 #include <event2/util.h>
 #include <netlink/genl/genl.h>
-#include <netlink/genl/ctrl.h>
 #include "daemon.h"
 #include "bp_genl.h"
 #include "log.h"
 #include "bp.h"
-#include "../include/bp.h"
 
 void on_sigint(evutil_socket_t fd, short what, void *arg)
 {

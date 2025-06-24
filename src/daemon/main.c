@@ -19,6 +19,5 @@ int main(int argc, char *argv[])
 	};
 
 	int ret = daemon_start(&daemon);
-
 	return ret;
 }
