@@ -110,7 +110,7 @@ int bp_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 
     if (service_id < 1 || service_id > 255)
     {
-        pr_err("bp_bind: invalid agent ID %d (must be in [0, 255])\n", service_id);
+        pr_err("bp_bind: invalid service ID %d (must be in [0, 255])\n", service_id);
         rc = -EINVAL;
         goto out;
     }
@@ -122,7 +122,7 @@ int bp_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
         if (iter_bp->bp_service_id == service_id)
         {
             rc = -EADDRINUSE;
-            pr_err("bp_bind: agent %d already bound\n", service_id);
+            pr_err("bp_bind: service %d already bound\n", service_id);
             read_unlock_bh(&bp_list_lock);
             goto out;
         }
@@ -137,7 +137,7 @@ int bp_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
     write_unlock_bh(&bp_list_lock);
     release_sock(sk);
 
-    pr_info("bp_bind: socket bound to agent %d\n", service_id);
+    pr_info("bp_bind: socket bound to service %d\n", service_id);
 out:
     return rc;
 }
@@ -225,7 +225,7 @@ int bp_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int flags)
     int ret;
 
     pr_info("bp_recvmsg: entering function 2.0\n");
-    notify_deamon_doit(bp->bp_service_id, 8443);
+    request_bundle_doit(bp->bp_service_id, 8443);
 
     sock_hold(sk);
     lock_sock(sk);
@@ -245,12 +245,12 @@ int bp_recvmsg(struct socket *sock, struct msghdr *msg, size_t size, int flags)
     skb = skb_dequeue(&bp->queue);
     if (!skb)
     {
-        pr_info("bp_recvmsg: no messages in the queue for agent %d\n", service_id);
+        pr_info("bp_recvmsg: no messages in the queue for service %d\n", service_id);
         ret = -EAGAIN;
         goto out_unlock;
     }
 
-    pr_info("bp_recvmsg: message dequeued for agent %d\n", service_id);
+    pr_info("bp_recvmsg: message dequeued for service %d\n", service_id);
 
     if (skb->len > size)
     {

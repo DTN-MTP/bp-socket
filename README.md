@@ -30,7 +30,7 @@ Bp-socket consists of two key components:
 
 The resulting “BP Sockets” interface integrates with bundle protocol stacks in user space. Netlink IPC (Inter-Process Communication) coordinates kernel and user space interactions. The main elements of the architecture are described below.
 
-![Architecture](./docs/img/architecture.png)
+![Architecture](./Documentation/img/architecture.png)
 
 <details close>
 <summary>Application</summary>
@@ -57,7 +57,7 @@ Upon receiving a message, the BP Sockets Daemon in userspace retrieves the EID a
 
 It was demonstrated by transmitting bundles from a minimal user space application through the Linux kernel and ION to µD3TN using BP Sockets. The screenshot below shows the µD3TN log (the receiving BP node) on the top, the BP Sockets App sender on the bottom left, and the BP App receiver output on the bottom right.
 
-![Screenshot](./docs/img/outcome.png)
+![Screenshot](./Documentation/img/outcome.png)
 
 ## Prerequisites
 

@@ -15,7 +15,7 @@ static struct genl_ops genl_ops[] = {
 		.cmd = BP_GENL_CMD_DELIVER_BUNDLE,
 		.flags = GENL_ADMIN_PERM,
 		.policy = nla_policy,
-		.doit = recv_reply_bundle_doit,
+		.doit = deliver_bundle_doit,
 		.dumpit = NULL,
 	}};
 
@@ -104,7 +104,7 @@ out:
 	return ret;
 }
 
-int notify_deamon_doit(u32 service_id, int port_id)
+int request_bundle_doit(u32 service_id, int port_id)
 {
 	int ret = 0;
 	void *hdr;
@@ -150,7 +150,7 @@ out:
 	return ret;
 }
 
-int recv_reply_bundle_doit(struct sk_buff *skb, struct genl_info *info)
+int deliver_bundle_doit(struct sk_buff *skb, struct genl_info *info)
 {
 	struct sock *sk;
 	struct bp_sock *bp;
@@ -176,7 +176,7 @@ int recv_reply_bundle_doit(struct sk_buff *skb, struct genl_info *info)
 	payload = nla_data(info->attrs[BP_GENL_A_PAYLOAD]);
 	payload_len = nla_len(info->attrs[BP_GENL_A_PAYLOAD]);
 
-	pr_info("Message for agent %d: %s\n", service_id, payload);
+	pr_info("Message for service %d: %s\n", service_id, payload);
 
 	new_skb = alloc_skb(payload_len, GFP_KERNEL);
 	if (!new_skb)
