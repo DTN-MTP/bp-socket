@@ -11,8 +11,7 @@
 HLIST_HEAD(bp_list);
 DEFINE_RWLOCK(bp_list_lock);
 
-struct proto bp_proto = {
-	.name = "BP",
+struct proto bp_proto = {.name = "BP",
 	.owner = THIS_MODULE,
 	.obj_size = sizeof(struct bp_sock),
 };
