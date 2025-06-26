@@ -1,56 +1,31 @@
-CC = gcc
-CXXFLAGS=-Wall -Wno-deprecated-declarations
-CXX_DEBUG_FLAGS=-g
-CXX_RELEASE_FLAGS=-O3 -DNO_LOG
-CXX_CLIENTAUTH_FLAGS= -g -DCLIENT_AUTH
- 
-EXEC = bp_daemon
-SOURCES = $(wildcard *.c)
-OBJECTS = $(SOURCES:.c=.o)
-STD_INCLUDES = `pkg-config --cflags libnl-3.0`
-NEW_INCLUDES = \
-	`pkg-config --cflags libnl-3.0` \
-	-Ilibevent/include
-LIBS = 	-lpthread \
-	-lbp -lici \
-	`pkg-config --libs \
-		libevent \
-		libnl-genl-3.0` \
-	-lm
-LIBS_EX = \
-	-Llibevent/lib \
-	-Wl,-rpath \
-	-Wl,libevent/lib \
-	-Wl,-rpath \
-	-lpthread \
-	`pkg-config --libs \
-		libnl-genl-3.0 \
-		libnotify \
-		`
-  
-INCLUDES= \
-	`pkg-config --cflags libnotify`
+CC := gcc
+CFLAGS := -Wall -Wno-deprecated-declarations -g
+LDFLAGS := -lpthread -lbp -lici -lm \
+	$(shell pkg-config --libs libevent libnl-genl-3.0)
 
-BASHRC=$(HOME)/.bashrc
+INCLUDES := $(shell pkg-config --cflags libnl-3.0)
 
-.PHONY: clean
+EXEC := bp_daemon
+SOURCES := $(wildcard *.c)
+OBJECTS := $(SOURCES:.c=.o)
 
-all: CXXFLAGS+=$(CXX_DEBUG_FLAGS)
-all: INCLUDES=$(STD_INCLUDES)
+SRC_FILES := $(wildcard *.c *.h)
+
+.PHONY: all release clean format
+
 all: $(EXEC)
 
-release: CXXFLAGS+=$(CXX_RELEASE_FLAGS)
-release: INCLUDES+=$(STD_INCLUDES)
-release: $(EXEC)
+release: CFLAGS := -Wall -Wno-deprecated-declarations -O3 -DNO_LOG
+release: all
 
-# Main target
 $(EXEC): $(OBJECTS)
-	$(CC) $(OBJECTS) -o $(EXEC) $(LIBS)
- 
-# To obtain object files
+	$(CC) $(OBJECTS) -o $@ $(LDFLAGS)
+
 %.o: %.c
-	$(CC) -c $(CXXFLAGS) $< $(INCLUDES) -o $@
- 
-# To remove generated files
+	$(CC) -c $(CFLAGS) $(INCLUDES) $< -o $@
+
 clean:
 	rm -f $(EXEC) $(OBJECTS)
+
+format:
+	clang-format -i --style=file $(SRC_FILES)

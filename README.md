@@ -213,15 +213,13 @@ cd /bp-socket/configs
 export LD_LIBRARY_PATH="/usr/local/lib"
 ionstart -I ./host.rc
 
-# b) Build and insert the **Bundle Protocol (BP)** kernel module:
-cd /bp-socket/bp_socket
+# b) Build project
+cd /bp-socket/
 make
-insmod bp.ko
 
-# c) Build and launch the userspace daemon:
-cd /bp-socket/daemon
-make
-./bp_daemon
+# c) Insert the bp.ko file and run the userspace daemon:
+insmod /bp-socket/bp.ko
+/bp-socket/bp_daemon
 ```
 
 </details>

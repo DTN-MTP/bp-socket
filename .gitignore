@@ -61,3 +61,4 @@ tools/bp-demo-sender
 tools/bp-demo-receiver
 daemon/bp_daemon
 daemon/.*
+!daemon/.clang-format

@@ -1,0 +1,20 @@
+name: Clang Format Checker
+
+on:
+  pull_request:
+
+jobs:
+  clang-format-checking:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        path:
+          - 'bp_socket'
+          - 'daemon'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run clang-format style check
+        uses: jidicula/clang-format-action@v4.15.0
+        with:
+          clang-format-version: '20'
+          check-path: ${{ matrix.path }}
