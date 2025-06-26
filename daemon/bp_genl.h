@@ -1,8 +1,8 @@
 #ifndef BP_GENL_H
 #define BP_GENL_H
 
-#include <netlink/socket.h>
 #include "daemon.h"
+#include <netlink/socket.h>
 
 struct nl_sock *genl_bp_sock_init(Daemon *daemon);
 void genl_bp_sock_close(Daemon *daemon);

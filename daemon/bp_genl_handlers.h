@@ -3,8 +3,7 @@
 
 #include "daemon.h"
 
-struct thread_args
-{
+struct thread_args {
     struct nl_sock *netlink_sock;
     int netlink_family;
     unsigned int service_id;
