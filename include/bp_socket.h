@@ -1,7 +1,11 @@
 #ifndef BP_SOCKET_H
 #define BP_SOCKET_H
 
+#ifdef __KERNEL__
 #include <linux/socket.h>
+#else
+#include <sys/socket.h>
+#endif
 
 #define AF_BP 28
 #define BP_GENL_NAME "bp_genl"
@@ -9,26 +13,24 @@
 #define BP_GENL_MC_GRP_NAME "bp_genl_mcgrp"
 
 /* Generic Netlink attributes */
-enum bp_genl_attrs
-{
-    BP_GENL_A_UNSPEC,
-    BP_GENL_A_SOCKID,
-    BP_GENL_A_SERVICE_ID,
-    BP_GENL_A_EID,
-    BP_GENL_A_PAYLOAD,
-    __BP_GENL_A_MAX,
+enum bp_genl_attrs {
+  BP_GENL_A_UNSPEC,
+  BP_GENL_A_SOCKID,
+  BP_GENL_A_SERVICE_ID,
+  BP_GENL_A_EID,
+  BP_GENL_A_PAYLOAD,
+  __BP_GENL_A_MAX,
 };
 
 #define BP_GENL_A_MAX (__BP_GENL_A_MAX - 1)
 
 /* Commands */
-enum bp_genl_cmds
-{
-    BP_GENL_CMD_UNSPEC,
-    BP_GENL_CMD_SEND_BUNDLE,
-    BP_GENL_CMD_REQUEST_BUNDLE,
-    BP_GENL_CMD_DELIVER_BUNDLE,
-    __BP_GENL_CMD_MAX,
+enum bp_genl_cmds {
+  BP_GENL_CMD_UNSPEC,
+  BP_GENL_CMD_SEND_BUNDLE,
+  BP_GENL_CMD_REQUEST_BUNDLE,
+  BP_GENL_CMD_DELIVER_BUNDLE,
+  __BP_GENL_CMD_MAX,
 };
 
 #define BP_GENL_CMD_MAX (__BP_GENL_CMD_MAX - 1)
@@ -45,10 +47,9 @@ static const struct nla_policy nla_policy[BP_GENL_A_MAX + 1] = {
 };
 #endif
 
-struct sockaddr_bp
-{
-    sa_family_t bp_family;
-    char eid_str[126];
+struct sockaddr_bp {
+  sa_family_t bp_family;
+  char eid_str[126];
 };
 
 #endif
