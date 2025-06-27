@@ -2,6 +2,8 @@ name: Kernel Module CI
 
 on:
   pull_request:
+    # paths: 
+    #   - 'bp_socket/**'
 
 jobs:
   kernel-module:
