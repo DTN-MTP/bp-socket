@@ -13,20 +13,30 @@
 #include "log.h"
 
 int handle_send_bundle(Daemon *daemon, struct nlattr **attrs) {
-    if (!attrs[BP_GENL_A_SOCKID] || !attrs[BP_GENL_A_PAYLOAD] || !attrs[BP_GENL_A_EID]) {
+    if (!attrs[BP_GENL_A_SOCKID] || !attrs[BP_GENL_A_PAYLOAD] || !attrs[BP_GENL_A_NODE_ID] ||
+        !attrs[BP_GENL_A_SERVICE_ID]) {
         log_error("Missing attribute(s) in SEND_BUNDLE");
         return NL_SKIP;
     }
 
     unsigned long sockid = nla_get_u64(attrs[BP_GENL_A_SOCKID]);
-    char *payload = nla_get_string(attrs[BP_GENL_A_PAYLOAD]);
-    int payload_size = strlen(payload) + 1;
-    char *eid = nla_get_string(attrs[BP_GENL_A_EID]);
-    int eid_size = strlen(eid) + 1;
+    char *payload = nla_data(attrs[BP_GENL_A_PAYLOAD]);
+    int payload_size = nla_len(attrs[BP_GENL_A_PAYLOAD]);
+    uint32_t node_id = nla_get_u32(attrs[BP_GENL_A_NODE_ID]);
+    uint32_t service_id = nla_get_u32(attrs[BP_GENL_A_SERVICE_ID]);
 
-    log_info("SEND_BUNDLE: socket ID %lu", sockid);
-    return bp_send_to_eid(payload, payload_size, eid, eid_size);
+    char eid[64];
+    int eid_size = snprintf(eid, sizeof(eid), "ipn:%u.%u", node_id, service_id);
+    if (eid_size < 0 || eid_size >= (int)sizeof(eid)) {
+        log_error("Failed to construct EID string");
+        return -EINVAL;
+    }
+
+    log_info("SEND_BUNDLE: sockid=%lu, EID=%s, payload size=%d", sockid, eid, payload_size);
+
+    return bp_send_to_eid(payload, payload_size, eid, eid_size + 1);
 }
+
 int handle_request_bundle(Daemon *daemon, struct nlattr **attrs) {
     if (!attrs[BP_GENL_A_SERVICE_ID]) {
         log_error("Missing BP_GENL_A_SERVICE_ID in REQUEST_BUNDLE");
