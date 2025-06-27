@@ -1,70 +1,66 @@
+#include "../include/bp_socket.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include "../src/include/bp.h"
-
-#define PORT 12345
+#include <unistd.h>
 
 #define AF_BP 28
 
-int main(int argc, char *argv[])
-{
-    int sockfd, ret;
-    // struct sockaddr_in sa; // Standard socket address structure
-    if (argc < 2)
-    {
-        printf("Usage: %s <argument>\n", argv[0]);
-        return EXIT_FAILURE;
-    }
+int main(int argc, char *argv[]) {
+  int sockfd, ret;
+  uint32_t node_id, service_id;
 
+  if (argc < 3) {
+    printf("Usage: %s <node_id> <service_id>\n", argv[0]);
+    return EXIT_FAILURE;
+  }
 
+  // Parse arguments
+  node_id = (uint32_t)atoi(argv[1]);
+  service_id = (uint32_t)atoi(argv[2]);
 
-    // Create a socket
-    sockfd = socket(AF_BP, SOCK_DGRAM, 0);
-    if (sockfd < 0)
-    {
-        perror("socket creation failed");
-        return EXIT_FAILURE;
-    }
+  if (service_id < 1 || service_id > 255) {
+    fprintf(stderr, "Invalid service_id (must be in 1-255)\n");
+    return EXIT_FAILURE;
+  }
 
-    // Prepare destination address
-    // memset(&sa, 0, sizeof(sa));
-    // sa.sin_family = AF_INET;
-    // sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // Use loopback address
-    // sa.sin_port = htons(PORT); // Replace with your port number
+  if (node_id == 0) {
+    fprintf(stderr, "Invalid node_id (cannot be 0)\n");
+    return EXIT_FAILURE;
+  }
 
-    // with plain sockaddr (maybe introduce a struct sockaddr_bp ??)
-    struct sockaddr_bp eid_addr;
-    eid_addr.bp_family = AF_BP;
+  // Create a socket
+  sockfd = socket(AF_BP, SOCK_DGRAM, 0);
+  if (sockfd < 0) {
+    perror("socket creation failed");
+    return EXIT_FAILURE;
+  }
 
-    // Verify that the eid does not surpass the allocated space for it
-    // Accepting maximum 125 characters + null term
-    if (1 + strlen(argv[1]) > sizeof(eid_addr.eid_str)) {
-        perror("EID is too long") ;
-        return EXIT_FAILURE ;
-    }
+  // Prepare sockaddr_bp
+  struct sockaddr_bp dest_addr;
+  memset(&dest_addr, 0, sizeof(dest_addr));
+  dest_addr.bp_family = AF_BP;
+  dest_addr.bp_scheme = BP_SCHEME_IPN;
+  dest_addr.bp_addr.ipn.node_id = node_id;
+  dest_addr.bp_addr.ipn.service_id = service_id;
 
-    strncpy(eid_addr.eid_str, argv[1], sizeof(eid_addr.eid_str));
+  // Message to send
+  const char *message = "Hello!";
 
-    // Send a message
-    const char *message = "Hello!";
-
-    ret = sendto(sockfd, message, strlen(message) + 1, 0, &eid_addr, sizeof(eid_addr));
-    if (ret < 0)
-    {
-        perror("sendto failed");
-        close(sockfd);
-        return EXIT_FAILURE;
-    }
-
-    printf("Message sent successfully: %s\n", message);
-
-    // Clean up
+  ret = sendto(sockfd, message, strlen(message) + 1, 0,
+               (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+  if (ret < 0) {
+    perror("sendto failed");
     close(sockfd);
+    return EXIT_FAILURE;
+  }
 
-    return EXIT_SUCCESS;
+  printf("Message sent successfully: %s\n", message);
+
+  // Clean up
+  close(sockfd);
+
+  return EXIT_SUCCESS;
 }

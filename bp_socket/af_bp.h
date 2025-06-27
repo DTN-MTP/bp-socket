@@ -13,6 +13,7 @@ extern const struct net_proto_family bp_family_ops;
 
 struct bp_sock {
 	struct sock sk;
+	u_int32_t bp_node_id;
 	u_int8_t bp_service_id;
 	struct sk_buff_head queue;
 	wait_queue_head_t wait_queue;

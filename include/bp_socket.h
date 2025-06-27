@@ -3,8 +3,10 @@
 
 #ifdef __KERNEL__
 #include <linux/socket.h>
+#include <linux/types.h>
 #else
 #include <sys/socket.h>
+#include <stdint.h>
 #endif
 
 #define AF_BP 28
@@ -16,8 +18,8 @@
 enum bp_genl_attrs {
   BP_GENL_A_UNSPEC,
   BP_GENL_A_SOCKID,
+  BP_GENL_A_NODE_ID,
   BP_GENL_A_SERVICE_ID,
-  BP_GENL_A_EID,
   BP_GENL_A_PAYLOAD,
   __BP_GENL_A_MAX,
 };
@@ -41,15 +43,26 @@ enum bp_genl_cmds {
 static const struct nla_policy nla_policy[BP_GENL_A_MAX + 1] = {
     [BP_GENL_A_UNSPEC] = {.type = NLA_UNSPEC},
     [BP_GENL_A_SOCKID] = {.type = NLA_U64},
+    [BP_GENL_A_NODE_ID] = {.type = NLA_U32},
     [BP_GENL_A_SERVICE_ID] = {.type = NLA_U32},
-    [BP_GENL_A_EID] = {.type = NLA_NUL_STRING},
     [BP_GENL_A_PAYLOAD] = {.type = NLA_NUL_STRING},
 };
 #endif
 
+typedef enum bp_scheme {
+  BP_SCHEME_IPN = 1,
+  BP_SCHEME_DTN = 2,
+} bp_scheme_t;
+
 struct sockaddr_bp {
   sa_family_t bp_family;
-  char eid_str[126];
+  bp_scheme_t bp_scheme;
+  union {
+    struct {
+      uint32_t node_id;
+      uint32_t service_id;
+    } ipn;
+  } bp_addr;
 };
 
 #endif

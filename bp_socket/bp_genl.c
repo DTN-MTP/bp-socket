@@ -44,60 +44,68 @@ int fail_doit(struct sk_buff* skb, struct genl_info* info)
 	return -1;
 }
 
-int send_bundle_doit(u64 sockid, char* payload, int payload_size, char* eid,
-    int eid_size, int port_id)
+int send_bundle_doit(u64 sockid, const char* payload, int payload_size,
+    u32 node_id, u32 service_id, int port_id)
 {
 	int ret = 0;
 	void* hdr;
 	struct sk_buff* msg;
 	int msg_size;
 
-	/* Allocate a new buffer for the reply */
-	msg_size = nla_total_size(sizeof(u64)) + nla_total_size(eid_size)
-	    + nla_total_size(payload_size);
+	/* Compute total size of Netlink attributes */
+	msg_size = nla_total_size(sizeof(u64)) + nla_total_size(sizeof(u32))
+	    + nla_total_size(sizeof(u32)) + nla_total_size(payload_size);
+
+	/* Allocate a new buffer */
 	msg = genlmsg_new(msg_size + GENL_HDRLEN, GFP_KERNEL);
 	if (!msg) {
-		pr_err("failed to allocate message buffer\n");
+		pr_err("send_bundle: failed to allocate message buffer\n");
 		return -ENOMEM;
 	}
 
-	/* Put the Generic Netlink header */
+	/* Generic Netlink header */
 	hdr = genlmsg_put(msg, 0, 0, &genl_fam, 0, BP_GENL_CMD_SEND_BUNDLE);
 	if (!hdr) {
-		pr_err("failed to create genetlink header\n");
+		pr_err("send_bundle: failed to create genetlink header\n");
 		nlmsg_free(msg);
 		return -EMSGSIZE;
 	}
 
 	/* And the message */
-	if ((ret = nla_put_string(msg, BP_GENL_A_PAYLOAD, payload))) {
-		pr_err("failed to create message string\n");
-		genlmsg_cancel(msg, hdr);
-		nlmsg_free(msg);
-		goto out;
-	}
-	if ((ret = nla_put_string(msg, BP_GENL_A_EID, eid))) {
-		pr_err("failed to create message string\n");
-		genlmsg_cancel(msg, hdr);
-		nlmsg_free(msg);
-		goto out;
-	}
-	if ((ret = nla_put_u64_64bit(msg, BP_GENL_A_SOCKID, sockid, 0))) {
-		pr_err("failed to create message string\n");
-		genlmsg_cancel(msg, hdr);
-		nlmsg_free(msg);
-		goto out;
+	ret = nla_put_u64_64bit(msg, BP_GENL_A_SOCKID, sockid, 0);
+	if (ret) {
+		pr_err("send_bundle: failed to put SOCKID (%d)\n", ret);
+		goto fail;
 	}
 
-	/* Finalize the message and send it */
+	ret = nla_put_u32(msg, BP_GENL_A_NODE_ID, node_id);
+	if (ret) {
+		pr_err("send_bundle: failed to put NODE_ID (%d)\n", ret);
+		goto fail;
+	}
+
+	ret = nla_put_u32(msg, BP_GENL_A_SERVICE_ID, service_id);
+	if (ret) {
+		pr_err("send_bundle: failed to put SERVICE_ID (%d)\n", ret);
+		goto fail;
+	}
+
+	ret = nla_put(msg, BP_GENL_A_PAYLOAD, payload_size, payload);
+	if (ret) {
+		pr_err("send_bundle: failed to put PAYLOAD (%d)\n", ret);
+		goto fail;
+	}
+
 	genlmsg_end(msg, hdr);
 	ret = genlmsg_unicast(&init_net, msg, port_id);
 	if (ret != 0) {
-		pr_alert("Failed in gemlmsg_unicast [setsockopt notify]\n (%d)",
-		    ret);
+		pr_err("send_bundle: genlmsg_unicast failed (%d)\n", ret);
 	}
+	return ret;
 
-out:
+fail:
+	genlmsg_cancel(msg, hdr);
+	nlmsg_free(msg);
 	return ret;
 }
 
