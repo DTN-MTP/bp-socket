@@ -2,8 +2,8 @@ name: Daemon CI
 
 on:
   pull_request:
-    # paths: 
-    #   - 'daemon/**'
+    paths: 
+      - 'daemon/**'
 
 jobs:
   daemon:
