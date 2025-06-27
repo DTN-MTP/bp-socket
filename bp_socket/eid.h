@@ -1,6 +1,8 @@
 #ifndef EID_H
 #define EID_H
 
+#include <linux/types.h>
+
 enum bp_eid_scheme {
 	UNKNOWN_SCHEME = -1,
 	IPN,

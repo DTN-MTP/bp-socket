@@ -6,13 +6,16 @@ PWD := $(shell pwd)
 
 SRC_FILES := $(wildcard *.c *.h)
 
-.PHONY: all clean format
+.PHONY: all clean sparse
 
 all:
-	make -C $(KDIR) M=$(PWD) modules
+	$(MAKE) -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
 
 clean:
-	make -C $(KDIR) M=$(PWD) clean
+	$(MAKE) -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
+
+sparse:
+	$(MAKE) -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules C=1 CHECK=sparse
 
 format:
 	clang-format -i --style=file $(SRC_FILES)
