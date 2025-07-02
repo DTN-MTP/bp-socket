@@ -92,7 +92,7 @@ int handle_deliver_bundle(struct thread_args *args) {
     void *hdr = genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, args->netlink_family, 0, 0,
                             BP_GENL_CMD_DELIVER_BUNDLE, BP_GENL_VERSION);
     if (!hdr || nla_put_u32(msg, BP_GENL_A_SERVICE_ID, args->service_id) < 0 ||
-        nla_put_string(msg, BP_GENL_A_PAYLOAD, payload) < 0) {
+        nla_put(msg, BP_GENL_A_PAYLOAD, strlen(payload) + 1, payload) < 0) {
         log_error("DELIVER_BUNDLE: Failed to construct Netlink reply");
         nlmsg_free(msg);
         free(payload);

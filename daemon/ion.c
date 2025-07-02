@@ -1,35 +1,39 @@
 #include "log.h"
+#include "sdr.h"
 #include <bp.h>
 
-int bp_send_to_eid(char *payload, int payload_size, char *eid, int eid_size) {
+int bp_send_to_eid(char *payload, int payload_size, char *destEid, int eid_size) {
     Sdr sdr;
-    Object bundlePayload;
-    Object bundleZco;
+    Object sdrBuffer;
+    Object zco;
 
     sdr = bp_get_sdr();
     if (sdr == NULL) {
         log_error("*** Failed to get sdr.");
         return 0;
     }
+
     oK(sdr_begin_xn(sdr));
-    bundlePayload = sdr_string_create(sdr, payload);
-    if (bundlePayload == 0) {
+
+    sdrBuffer = sdr_malloc(sdr, payload_size);
+    if (sdrBuffer == 0) {
         sdr_end_xn(sdr);
-        log_error("No text object.");
+        log_error("sdr_malloc failed.");
         return 0;
     }
 
-    bundleZco = zco_create(sdr, ZcoSdrSource, bundlePayload, 0, payload_size, ZcoOutbound);
-    if (bundleZco == 0 || bundleZco == (Object)ERROR) {
+    sdr_write(sdr, sdrBuffer, payload, payload_size);
+
+    zco = zco_create(sdr, ZcoSdrSource, sdrBuffer, 0, payload_size, ZcoOutbound);
+    if (zco == 0 || zco == (Object)ERROR) {
         sdr_end_xn(sdr);
-        log_error("No text object.");
+        log_error("zco_create failed.");
         return 0;
     }
 
-    if (bp_send(NULL, eid, NULL, 86400, BP_STD_PRIORITY, 0, 0, 0, NULL, bundleZco, NULL) <= 0) {
+    if (bp_send(NULL, destEid, NULL, 86400, BP_STD_PRIORITY, 0, 0, 0, NULL, zco, NULL) <= 0) {
         sdr_end_xn(sdr);
-        log_error("No text object.");
-        log_error("bpsockets daemon can't send bundle.");
+        log_error("bp_send failed.");
         return 0;
     }
 

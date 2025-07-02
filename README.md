@@ -218,8 +218,8 @@ cd /bp-socket/
 make
 
 # c) Insert the bp.ko file and run the userspace daemon:
-insmod /bp-socket/bp.ko
-/bp-socket/bp_daemon
+insmod /bp-socket/bp_socket/bp.ko
+/bp-socket/daemon/bp_daemon
 ```
 
 </details>
@@ -251,7 +251,7 @@ python3 tools/aap2/aap2_receive.py --agentid 2 --socket ./ud3tn.aap2.socket.2
 # SSH into ion-node before
 cd /bp-socket/tools
 gcc -o bp-demo-sender bp-demo-sender.c
-./bp-demo-sender ipn:20.2
+./bp-demo-sender 20 2
 ```
 
 </details>
@@ -265,7 +265,7 @@ gcc -o bp-demo-sender bp-demo-sender.c
 # SSH into ion-node before
 cd /bp-socket/tools
 gcc -o bp-demo-receiver bp-demo-receiver.c
-./bp-demo-receiver ipn:10.2
+./bp-demo-receiver 10 2
 ```
 
 </details>

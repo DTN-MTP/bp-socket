@@ -5,8 +5,8 @@
 #include <linux/socket.h>
 #include <linux/types.h>
 #else
-#include <sys/socket.h>
 #include <stdint.h>
+#include <sys/socket.h>
 #endif
 
 #define AF_BP 28
@@ -36,18 +36,6 @@ enum bp_genl_cmds {
 };
 
 #define BP_GENL_CMD_MAX (__BP_GENL_CMD_MAX - 1)
-
-#ifdef __KERNEL__
-#include <net/genetlink.h>
-
-static const struct nla_policy nla_policy[BP_GENL_A_MAX + 1] = {
-    [BP_GENL_A_UNSPEC] = {.type = NLA_UNSPEC},
-    [BP_GENL_A_SOCKID] = {.type = NLA_U64},
-    [BP_GENL_A_NODE_ID] = {.type = NLA_U32},
-    [BP_GENL_A_SERVICE_ID] = {.type = NLA_U32},
-    [BP_GENL_A_PAYLOAD] = {.type = NLA_NUL_STRING},
-};
-#endif
 
 typedef enum bp_scheme {
   BP_SCHEME_IPN = 1,
