@@ -3,22 +3,21 @@
 #include "af_bp.h"
 #include <net/genetlink.h>
 
-static struct genl_ops genl_ops[] = {
-	// {
-	// 	.cmd = BP_GENL_CMD_SEND_BUNDLE,
-	// 	.flags = GENL_ADMIN_PERM,
-	// 	.policy = nla_policy,
-	// 	.doit = fail_doit,
-	// 	.dumpit = NULL,
-	// },
-	{
-	    .cmd = BP_GENL_CMD_DELIVER_BUNDLE,
-	    .flags = GENL_ADMIN_PERM,
-	    .policy = nla_policy,
-	    .doit = deliver_bundle_doit,
-	    .dumpit = NULL,
-	}
+static const struct nla_policy nla_policy[BP_GENL_A_MAX + 1] = {
+	[BP_GENL_A_UNSPEC] = { .type = NLA_UNSPEC },
+	[BP_GENL_A_SOCKID] = { .type = NLA_U64 },
+	[BP_GENL_A_NODE_ID] = { .type = NLA_U32 },
+	[BP_GENL_A_SERVICE_ID] = { .type = NLA_U32 },
+	[BP_GENL_A_PAYLOAD] = { .type = NLA_BINARY },
 };
+
+static struct genl_ops genl_ops[] = { {
+    .cmd = BP_GENL_CMD_DELIVER_BUNDLE,
+    .flags = GENL_ADMIN_PERM,
+    .policy = nla_policy,
+    .doit = deliver_bundle_doit,
+    .dumpit = NULL,
+} };
 
 /* Multicast groups for our family */
 static const struct genl_multicast_group genl_mcgrps[] = {
