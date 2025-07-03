@@ -11,6 +11,7 @@ struct thread_args {
 
 int handle_send_bundle(Daemon *daemon, struct nlattr **attrs);
 int handle_request_bundle(Daemon *daemon, struct nlattr **attrs);
+int handle_cancel_request_bundle(Daemon *daemon, struct nlattr **attrs);
 int handle_deliver_bundle(struct thread_args *args);
 void *bp_recv_thread(void *arg);
 

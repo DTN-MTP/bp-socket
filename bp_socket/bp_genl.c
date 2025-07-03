@@ -187,7 +187,7 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 	read_lock_bh(&bp_list_lock);
 	sk_for_each(sk, &bp_list)
 	{
-		lock_sock(sk);
+		bh_lock_sock(sk);
 		bp = bp_sk(sk);
 
 		if (bp->bp_service_id == service_id) {
@@ -195,12 +195,56 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 			skb_queue_tail(&bp->queue, new_skb);
 			if (waitqueue_active(&bp->wait_queue))
 				wake_up_interruptible(&bp->wait_queue);
-			release_sock(sk);
+			bh_unlock_sock(sk);
 			break;
 		}
-		release_sock(sk);
+		bh_unlock_sock(sk);
 	}
 	read_unlock_bh(&bp_list_lock);
 
 	return 0;
+}
+
+int cancel_request_bundle_doit(u32 node_id, u32 service_id, int port_id)
+{
+	int ret = 0;
+	void* hdr;
+	struct sk_buff* msg;
+	int msg_size;
+
+	msg_size = 2 * nla_total_size(sizeof(u32));
+	msg = genlmsg_new(msg_size + GENL_HDRLEN, GFP_KERNEL);
+	if (!msg) {
+		pr_err("cancel_bundle: failed to allocate message buffer\n");
+		return -ENOMEM;
+	}
+
+	hdr = genlmsg_put(
+	    msg, 0, 0, &genl_fam, 0, BP_GENL_CMD_CANCEL_REQUEST_BUNDLE);
+	if (!hdr) {
+		pr_err("cancel_bundle: failed to create genetlink header\n");
+		nlmsg_free(msg);
+		return -EMSGSIZE;
+	}
+
+	if ((ret = nla_put_u32(msg, BP_GENL_A_SERVICE_ID, service_id))) {
+		pr_err("cancel_bundle: failed to put service_id\n");
+		genlmsg_cancel(msg, hdr);
+		nlmsg_free(msg);
+		return ret;
+	}
+
+	if ((ret = nla_put_u32(msg, BP_GENL_A_NODE_ID, node_id))) {
+		pr_err("cancel_bundle: failed to put node_id\n");
+		genlmsg_cancel(msg, hdr);
+		nlmsg_free(msg);
+		return ret;
+	}
+
+	genlmsg_end(msg, hdr);
+	ret = genlmsg_unicast(&init_net, msg, port_id);
+	if (ret != 0) {
+		pr_err("cancel_bundle: unicast failed (%d)\n", ret);
+	}
+	return ret;
 }

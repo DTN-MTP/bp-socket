@@ -29,7 +29,8 @@ static struct sock* bp_alloc_socket(struct net* net, int kern)
 	bp = bp_sk(sk);
 	skb_queue_head_init(&bp->queue);
 	init_waitqueue_head(&bp->wait_queue);
-
+	bp->bp_node_id = 0;
+	bp->bp_service_id = 0;
 out:
 	return sk;
 }
@@ -163,6 +164,9 @@ int bp_release(struct socket* sock)
 	lock_sock(sk);
 	sock_orphan(sk);
 	bp = bp_sk(sk);
+
+	if (bp->bp_service_id > 0 && bp->bp_node_id > 0)
+		cancel_request_bundle_doit(bp->bp_node_id, bp->bp_service_id, 8443);
 
 	write_lock_bh(&bp_list_lock);
 	sk_del_node_init(sk);

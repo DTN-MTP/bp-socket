@@ -70,6 +70,8 @@ int genl_bp_sock_recvmsg_cb(struct nl_msg *msg, void *arg) {
         return handle_send_bundle(daemon, attrs);
     case BP_GENL_CMD_REQUEST_BUNDLE:
         return handle_request_bundle(daemon, attrs);
+    case BP_GENL_CMD_CANCEL_REQUEST_BUNDLE:
+        return handle_cancel_request_bundle(daemon, attrs);
     default:
         log_error("Unknown GENL command: %d", genlhdr->cmd);
         return NL_SKIP;
