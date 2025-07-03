@@ -107,7 +107,8 @@ int handle_deliver_bundle(struct thread_args *args) {
             return err;
         }
 
-        log_info("DELIVER_BUNDLE: Received bundle and forwarding to kernel (service ID %u)", args->service_id);
+        log_info("DELIVER_BUNDLE: Received bundle and forwarding to kernel (service ID %u)",
+                 args->service_id);
 
         nlmsg_free(msg);
         free(payload);
@@ -132,7 +133,7 @@ int handle_cancel_request_bundle(Daemon *daemon, struct nlattr **attrs) {
 
     uint32_t service_id = nla_get_u32(attrs[BP_GENL_A_SERVICE_ID]);
     uint32_t node_id = nla_get_u32(attrs[BP_GENL_A_NODE_ID]);
-    
+
     bp_cancel_recv_once(node_id, service_id);
 
     log_info("CANCEL_REQUEST_BUNDLE: Cancel bundle request (service ID %u)", service_id);

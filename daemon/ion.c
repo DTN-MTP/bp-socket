@@ -1,7 +1,7 @@
+#include "ion.h"
 #include "log.h"
 #include "sdr.h"
 #include <bp.h>
-#include "ion.h"
 #include <pthread.h>
 
 static struct sap_node *sap_list = NULL;

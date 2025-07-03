@@ -160,8 +160,8 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 	size_t payload_len;
 	struct sk_buff* new_skb;
 
-	if (!info->attrs[BP_GENL_A_SERVICE_ID] ||
-	    !info->attrs[BP_GENL_A_PAYLOAD]) {
+	if (!info->attrs[BP_GENL_A_SERVICE_ID]
+	    || !info->attrs[BP_GENL_A_PAYLOAD]) {
 		pr_err("deliver_bundle: missing required attributes\n");
 		return -EINVAL;
 	}

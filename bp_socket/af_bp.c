@@ -167,7 +167,8 @@ int bp_release(struct socket* sock)
 	bp = bp_sk(sk);
 
 	if (bp->recv_interrupted)
-		cancel_request_bundle_doit (bp->bp_node_id, bp->bp_service_id, 8443);
+		cancel_request_bundle_doit(
+		    bp->bp_node_id, bp->bp_service_id, 8443);
 
 	write_lock_bh(&bp_list_lock);
 	sk_del_node_init(sk);
