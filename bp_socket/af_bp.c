@@ -90,18 +90,13 @@ int bp_bind(struct socket* sock, struct sockaddr* uaddr, int addr_len)
 	struct sockaddr_bp* addr = (struct sockaddr_bp*)uaddr;
 	int service_id = -1;
 	int node_id = -1;
+	int err = 0;
 
-	if (addr_len < sizeof(struct sockaddr_bp)) {
-		pr_err("bp_bind: address length too short (expected: %zu, "
-		       "provided: %d)\n",
-		    sizeof(struct sockaddr_bp), addr_len);
+	if (addr_len != sizeof(struct sockaddr_bp))
 		return -EINVAL;
-	}
-	if (addr->bp_family != AF_BP) {
-		pr_err("bp_bind: unsupported address family %d\n",
-		    addr->bp_family);
-		return -EAFNOSUPPORT;
-	}
+
+	if (addr->bp_family != AF_BP)
+		return -EINVAL;
 
 	switch (addr->bp_scheme) {
 	case BP_SCHEME_IPN:
@@ -123,7 +118,7 @@ int bp_bind(struct socket* sock, struct sockaddr* uaddr, int addr_len)
 		break;
 
 	case BP_SCHEME_DTN:
-		pr_err("bp_bind: DTN scheme not supported yet\n");
+		pr_err("bp_bind: DTN scheme not supported\n");
 		return -EAFNOSUPPORT;
 	default:
 		pr_err("bp_bind: unknown scheme %d\n", addr->bp_scheme);
@@ -136,47 +131,45 @@ int bp_bind(struct socket* sock, struct sockaddr* uaddr, int addr_len)
 		iter_bp = bp_sk(iter_sk);
 		if (iter_bp->bp_service_id == service_id
 		    && iter_bp->bp_node_id == node_id) {
-			pr_err(
-			    "bp_bind: service %d already bound for node %u\n",
-			    service_id, node_id);
 			read_unlock_bh(&bp_list_lock);
-			return -EADDRINUSE;
+			err = -EADDRINUSE;
+			goto out;
 		}
 	}
 	read_unlock_bh(&bp_list_lock);
 
-	bp = bp_sk(sk);
 	lock_sock(sk);
+	bp = bp_sk(sk);
 	bp->bp_service_id = service_id;
 	bp->bp_node_id = node_id;
 	write_lock_bh(&bp_list_lock);
 	sk_add_node(sk, &bp_list);
 	write_unlock_bh(&bp_list_lock);
+
+out:
 	release_sock(sk);
 
-	pr_info("bp_bind: socket bound to node %u service %d\n", node_id,
-	    service_id);
-
-	return 0;
+	return err;
 }
 
 int bp_release(struct socket* sock)
 {
 	struct sock* sk = sock->sk;
-	struct bp_sock* bp = bp_sk(sk);
+	struct bp_sock* bp;
 
 	if (!sk)
 		return 0;
 
+	lock_sock(sk);
+	sock_orphan(sk);
+	bp = bp_sk(sk);
+
 	write_lock_bh(&bp_list_lock);
 	sk_del_node_init(sk);
 	write_unlock_bh(&bp_list_lock);
-
 	skb_queue_purge(&bp->queue);
 
-	sock_hold(sk);
-	lock_sock(sk);
-	sock_orphan(sk);
+	sock->sk = NULL;
 	release_sock(sk);
 	sock_put(sk);
 
@@ -190,6 +183,7 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 	uintptr_t sockid;
 	int service_id = -1;
 	int node_id = -1;
+	int ret;
 
 	if (!msg->msg_name) {
 		pr_err("bp_sendmsg: no destination address provided\n");
@@ -250,31 +244,39 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 	}
 
 	sockid = (uintptr_t)sock->sk->sk_socket;
-	send_bundle_doit(
-	    sockid, (char*)payload, size, node_id, service_id, 8443);
 
+	ret = send_bundle_doit(
+	    sockid, (char*)payload, size, node_id, service_id, 8443);
 	kfree(payload);
-	return 0;
+
+	if (ret < 0) {
+		pr_err("bp_sendmsg: send_bundle_doit failed (%d)\n", ret);
+		return ret;
+	}
+
+	return size;
 }
 
 int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 {
 	struct sock* sk = sock->sk;
-	struct bp_sock* bp = bp_sk(sk);
-	u32 service_id = bp->bp_service_id;
+	struct bp_sock* bp;
 	struct sk_buff* skb;
+	u32 service_id;
 	int ret;
 
+	lock_sock(sk);
+	bp = bp_sk(sk);
+	service_id = bp->bp_service_id;
 	request_bundle_doit(bp->bp_service_id, 8443);
 
-	sock_hold(sk);
-	lock_sock(sk);
 	ret = wait_event_interruptible(
 	    bp->wait_queue, !skb_queue_empty(&bp->queue));
 	if (ret < 0) {
 		pr_err("bp_recvmsg: interrupted while waiting\n");
 		goto out_unlock;
 	}
+
 	if (sock_flag(sk, SOCK_DEAD)) {
 		pr_err("bp_recvmsg: socket closed while waiting\n");
 		ret = -ECONNRESET;
@@ -289,11 +291,9 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 		goto out_unlock;
 	}
 
-	pr_info("bp_recvmsg: message dequeued for service %d\n", service_id);
-
 	if (skb->len > size) {
-		pr_err("bp_recvmsg: buffer too small for message (required: "
-		       "%u, provided: %zu)\n",
+		pr_err("bp_recvmsg: buffer too small for message (required=%u, "
+		       "provided=%zu)\n",
 		    skb->len, size);
 		ret = -EMSGSIZE;
 		goto out_free_skb;
@@ -311,9 +311,6 @@ out_free_skb:
 	kfree_skb(skb);
 out_unlock:
 	release_sock(sk);
-	sock_put(sk);
-
-	pr_info("bp_recvmsg: exiting function\n");
 
 	return ret;
 }
