@@ -17,6 +17,7 @@ struct bp_sock {
 	u_int8_t bp_service_id;
 	struct sk_buff_head queue;
 	wait_queue_head_t wait_queue;
+	bool recv_interrupted;
 };
 
 int bp_bind(struct socket* sock, struct sockaddr* addr, int addr_len);

@@ -160,22 +160,15 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 	size_t payload_len;
 	struct sk_buff* new_skb;
 
-	pr_info("TRIGGER: received message\n");
-
-	if (!info->attrs[BP_GENL_A_SERVICE_ID]) {
-		pr_err("attribute missing from message\n");
+	if (!info->attrs[BP_GENL_A_SERVICE_ID] ||
+	    !info->attrs[BP_GENL_A_PAYLOAD]) {
+		pr_err("deliver_bundle: missing required attributes\n");
 		return -EINVAL;
 	}
+
 	service_id = nla_get_u32(info->attrs[BP_GENL_A_SERVICE_ID]);
-
-	if (!info->attrs[BP_GENL_A_PAYLOAD]) {
-		pr_err("empty message received\n");
-		return -EINVAL;
-	}
 	payload = nla_data(info->attrs[BP_GENL_A_PAYLOAD]);
 	payload_len = nla_len(info->attrs[BP_GENL_A_PAYLOAD]);
-
-	pr_info("Message for service %d: %s\n", service_id, payload);
 
 	new_skb = alloc_skb(payload_len, GFP_KERNEL);
 	if (!new_skb) {
