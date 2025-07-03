@@ -187,16 +187,18 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 	read_lock_bh(&bp_list_lock);
 	sk_for_each(sk, &bp_list)
 	{
+		lock_sock(sk);
 		bp = bp_sk(sk);
 
 		if (bp->bp_service_id == service_id) {
 
 			skb_queue_tail(&bp->queue, new_skb);
-			wake_up_interruptible(&bp->wait_queue);
-			pr_info("Payload queued successfully for agent: %d\n",
-			    bp->bp_service_id);
+			if (waitqueue_active(&bp->wait_queue))
+				wake_up_interruptible(&bp->wait_queue);
+			release_sock(sk);
 			break;
 		}
+		release_sock(sk);
 	}
 	read_unlock_bh(&bp_list_lock);
 
