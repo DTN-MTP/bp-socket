@@ -1,6 +1,9 @@
+#include "ion.h"
 #include "log.h"
 #include "sdr.h"
 #include <bp.h>
+#include <pthread.h>
+#include "bp_receive_list.h"
 
 int bp_send_to_eid(char *payload, int payload_size, char *destEid, int eid_size) {
     Sdr sdr;
@@ -41,64 +44,91 @@ int bp_send_to_eid(char *payload, int payload_size, char *destEid, int eid_size)
     return 1;
 }
 
-char *bp_recv_once(int service_id) {
-    BpSAP txSap;
+BpIndResult bp_recv_once(int service_id, char **payload) {
+    BpSAP *txSap;
     BpDelivery dlv;
     Sdr sdr = getIonsdr();
     ZcoReader reader;
     char *eid = NULL;
-    char *payload = NULL;
     int eid_size;
     int nodeNbr = getOwnNodeNbr();
     vast len;
+
+    txSap = malloc(sizeof(BpSAP));
+    if (!txSap) {
+        log_error("Failed to allocate BpSAP");
+        return -1;
+    }
 
     eid_size = snprintf(NULL, 0, "ipn:%d.%d", nodeNbr, service_id) + 1;
     eid = malloc(eid_size);
     if (!eid) {
         log_error("Failed to allocate EID");
-        return NULL;
+        goto free_sap;
     }
     snprintf(eid, eid_size, "ipn:%d.%d", nodeNbr, service_id);
 
-    if (bp_open(eid, &txSap) < 0 || txSap == NULL) {
+    if (bp_open(eid, txSap) < 0) {
         log_error("Failed to open source endpoint.");
-        goto out;
+        goto free_eid;
     }
 
-    if (bp_receive(txSap, &dlv, BP_BLOCKING) < 0) {
+    bp_receive_list_add(nodeNbr, service_id, txSap);
+
+    if (bp_receive(*txSap, &dlv, BP_BLOCKING) < 0) {
         log_error("Bundle reception failed.");
         goto out;
     }
 
-    if (dlv.result != BpPayloadPresent) {
-        log_info("bp_recv_once: no payload");
-        goto out;
-    }
+    switch (dlv.result) {
+    case BpPayloadPresent:
+        if (!sdr_begin_xn(sdr)) {
+            goto out;
+        }
 
-    if (!sdr_begin_xn(sdr)) goto out;
+        int payload_size = zco_source_data_length(sdr, dlv.adu);
+        *payload = malloc(payload_size);
+        if (!*payload) {
+            log_error("Failed to allocate memory for payload");
+            sdr_exit_xn(sdr);
+            goto out;
+        }
 
-    int payload_size = zco_source_data_length(sdr, dlv.adu);
-    payload = malloc(payload_size);
-    if (!payload) {
-        log_error("Failed to allocate memory for payload");
-        sdr_exit_xn(sdr);
-        goto out;
-    }
+        zco_start_receiving(dlv.adu, &reader);
+        len = zco_receive_source(sdr, &reader, payload_size, *payload);
 
-    zco_start_receiving(dlv.adu, &reader);
-    len = zco_receive_source(sdr, &reader, payload_size, payload);
-
-    if (sdr_end_xn(sdr) < 0 || len < 0) {
-        log_error("Failed to read payload");
-        free(payload);
-        payload = NULL;
-        goto out;
+        if (sdr_end_xn(sdr) < 0 || len < 0) {
+            log_error("Failed to read payload");
+            free(*payload);
+            *payload = NULL;
+            goto out;
+        }
+        break;
+    case BpReceptionInterrupted:
+        break;
+    default:
+        log_error("bp_recv_once: unexpected result %d", dlv.result);
     }
 
 out:
-    if (eid) free(eid);
-    bp_release_delivery(&dlv, 0);
-    bp_close(txSap);
+    bp_release_delivery(&dlv, 1);
+    bp_receive_list_remove(nodeNbr, service_id);
+    bp_close(*txSap);
+free_eid:
+    free(eid);
+free_sap:
+    free(txSap);
 
-    return payload;
+    return dlv.result;
+}
+
+void bp_cancel_recv_once(uint32_t node_id, uint32_t service_id) {
+    BpSAP* sap = bp_receive_list_find(node_id, service_id);
+
+    if (sap == NULL) {
+        log_error("bp_interrupt: BpSAP is NULL");
+        return;
+    }
+
+    bp_interrupt(*sap);
 }

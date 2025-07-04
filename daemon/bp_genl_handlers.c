@@ -57,7 +57,7 @@ int handle_request_bundle(Daemon *daemon, struct nlattr **attrs) {
     args->netlink_family = daemon->genl_bp_family_id;
 
     pthread_t thread;
-    if (pthread_create(&thread, NULL, bp_recv_thread, args) != 0) {
+    if (pthread_create(&thread, NULL, handle_recv_thread, args) != 0) {
         log_error("Failed to create thread");
         free(args);
         return -1;
@@ -68,19 +68,27 @@ int handle_request_bundle(Daemon *daemon, struct nlattr **attrs) {
     return 0;
 }
 
-void *bp_recv_thread(void *arg) {
+void *handle_recv_thread(void *arg) {
     struct thread_args *args = (struct thread_args *)arg;
-    handle_deliver_bundle(args);
+    char *payload = NULL;
+
+    switch (bp_recv_once(args->service_id, &payload)) {
+    case BpPayloadPresent:
+        handle_deliver_bundle(payload, args);
+        break;
+    case BpReceptionInterrupted:
+        log_info("Reception interrupted (service ID %u)", args->service_id);
+        break;
+    default:
+        log_error("Error receiving bundle (service ID %u)", args->service_id);
+    }
+
     free(args);
     return NULL;
 }
 
-int handle_deliver_bundle(struct thread_args *args) {
-    char *payload = bp_recv_once(args->service_id);
-    if (!payload) {
-        log_error("DELIVER_BUNDLE: No payload received (service ID %u)", args->service_id);
-        return -1;
-    }
+int handle_deliver_bundle(char *payload, struct thread_args *args) {
+    int err = 0;
 
     struct nl_msg *msg = nlmsg_alloc();
     if (!msg) {
@@ -99,16 +107,36 @@ int handle_deliver_bundle(struct thread_args *args) {
         return -EMSGSIZE;
     }
 
-    int err = nl_send_auto(args->netlink_sock, msg);
-    nlmsg_free(msg);
-    free(payload);
-
+    err = nl_send_auto(args->netlink_sock, msg);
     if (err < 0) {
         log_error("DELIVER_BUNDLE: Failed to send Netlink message (service ID %u)",
                   args->service_id);
+        nlmsg_free(msg);
+        free(payload);
         return err;
     }
 
-    log_info("DELIVER_BUNDLE: Bundle successfully delivered (service ID %u)", args->service_id);
+    log_info("DELIVER_BUNDLE: Received bundle and forwarding to kernel (service ID %u)",
+             args->service_id);
+
+    nlmsg_free(msg);
+    free(payload);
+
+    return err;
+}
+
+int handle_cancel_request_bundle(Daemon *daemon, struct nlattr **attrs) {
+    if (!attrs[BP_GENL_A_SERVICE_ID] || !attrs[BP_GENL_A_NODE_ID]) {
+        log_error("Missing attribute(s) in CANCEL_REQUEST_BUNDLE");
+        return NL_SKIP;
+    }
+
+    uint32_t service_id = nla_get_u32(attrs[BP_GENL_A_SERVICE_ID]);
+    uint32_t node_id = nla_get_u32(attrs[BP_GENL_A_NODE_ID]);
+
+    bp_cancel_recv_once(node_id, service_id);
+
+    log_info("CANCEL_REQUEST_BUNDLE: Cancel bundle request (service ID %u)", service_id);
+
     return 0;
 }

@@ -29,7 +29,9 @@ static struct sock* bp_alloc_socket(struct net* net, int kern)
 	bp = bp_sk(sk);
 	skb_queue_head_init(&bp->queue);
 	init_waitqueue_head(&bp->wait_queue);
-
+	bp->bp_node_id = 0;
+	bp->bp_service_id = 0;
+	bp->recv_interrupted = false;
 out:
 	return sk;
 }
@@ -164,6 +166,10 @@ int bp_release(struct socket* sock)
 	sock_orphan(sk);
 	bp = bp_sk(sk);
 
+	if (bp->recv_interrupted)
+		cancel_request_bundle_doit(
+		    bp->bp_node_id, bp->bp_service_id, 8443);
+
 	write_lock_bh(&bp_list_lock);
 	sk_del_node_init(sk);
 	write_unlock_bh(&bp_list_lock);
@@ -247,13 +253,12 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 
 	ret = send_bundle_doit(
 	    sockid, (char*)payload, size, node_id, service_id, 8443);
-	kfree(payload);
-
 	if (ret < 0) {
 		pr_err("bp_sendmsg: send_bundle_doit failed (%d)\n", ret);
 		return ret;
 	}
 
+	kfree(payload);
 	return size;
 }
 
@@ -274,6 +279,7 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 	    bp->wait_queue, !skb_queue_empty(&bp->queue));
 	if (ret < 0) {
 		pr_err("bp_recvmsg: interrupted while waiting\n");
+		bp->recv_interrupted = true;
 		goto out_unlock;
 	}
 
