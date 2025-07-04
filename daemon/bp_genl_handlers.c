@@ -57,7 +57,7 @@ int handle_request_bundle(Daemon *daemon, struct nlattr **attrs) {
     args->netlink_family = daemon->genl_bp_family_id;
 
     pthread_t thread;
-    if (pthread_create(&thread, NULL, bp_recv_thread, args) != 0) {
+    if (pthread_create(&thread, NULL, handle_recv_thread, args) != 0) {
         log_error("Failed to create thread");
         free(args);
         return -1;
@@ -68,59 +68,59 @@ int handle_request_bundle(Daemon *daemon, struct nlattr **attrs) {
     return 0;
 }
 
-void *bp_recv_thread(void *arg) {
+void *handle_recv_thread(void *arg) {
     struct thread_args *args = (struct thread_args *)arg;
-    handle_deliver_bundle(args);
+    char *payload = NULL;
+
+    switch (bp_recv_once(args->service_id, &payload)) {
+    case BpPayloadPresent:
+        handle_deliver_bundle(payload, args);
+        break;
+    case BpReceptionInterrupted:
+        log_info("Reception interrupted (service ID %u)", args->service_id);
+        break;
+    default:
+        log_error("Error receiving bundle (service ID %u)", args->service_id);
+    }
+
     free(args);
     return NULL;
 }
 
-int handle_deliver_bundle(struct thread_args *args) {
-    char *payload = NULL;
+int handle_deliver_bundle(char *payload, struct thread_args *args) {
     int err = 0;
 
-    switch (bp_recv_once(args->service_id, &payload)) {
-    case BpPayloadPresent:
-        struct nl_msg *msg = nlmsg_alloc();
-        if (!msg) {
-            log_error("DELIVER_BUNDLE: Failed to allocate Netlink msg");
-            free(payload);
-            return -ENOMEM;
-        }
+    struct nl_msg *msg = nlmsg_alloc();
+    if (!msg) {
+        log_error("DELIVER_BUNDLE: Failed to allocate Netlink msg");
+        free(payload);
+        return -ENOMEM;
+    }
 
-        void *hdr = genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, args->netlink_family, 0, 0,
-                                BP_GENL_CMD_DELIVER_BUNDLE, BP_GENL_VERSION);
-        if (!hdr || nla_put_u32(msg, BP_GENL_A_SERVICE_ID, args->service_id) < 0 ||
-            nla_put(msg, BP_GENL_A_PAYLOAD, strlen(payload) + 1, payload) < 0) {
-            log_error("DELIVER_BUNDLE: Failed to construct Netlink reply");
-            nlmsg_free(msg);
-            free(payload);
-            return -EMSGSIZE;
-        }
-
-        err = nl_send_auto(args->netlink_sock, msg);
-        if (err < 0) {
-            log_error("DELIVER_BUNDLE: Failed to send Netlink message (service ID %u)",
-                      args->service_id);
-            nlmsg_free(msg);
-            free(payload);
-            return err;
-        }
-
-        log_info("DELIVER_BUNDLE: Received bundle and forwarding to kernel (service ID %u)",
-                 args->service_id);
-
+    void *hdr = genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, args->netlink_family, 0, 0,
+                            BP_GENL_CMD_DELIVER_BUNDLE, BP_GENL_VERSION);
+    if (!hdr || nla_put_u32(msg, BP_GENL_A_SERVICE_ID, args->service_id) < 0 ||
+        nla_put(msg, BP_GENL_A_PAYLOAD, strlen(payload) + 1, payload) < 0) {
+        log_error("DELIVER_BUNDLE: Failed to construct Netlink reply");
         nlmsg_free(msg);
         free(payload);
-
-        break;
-    case BpReceptionInterrupted:
-        break;
-    default:
-        log_error("DELIVER_BUNDLE: Error receiving bundle (service ID %u)", args->service_id);
-        err = -EIO;
-        break;
+        return -EMSGSIZE;
     }
+
+    err = nl_send_auto(args->netlink_sock, msg);
+    if (err < 0) {
+        log_error("DELIVER_BUNDLE: Failed to send Netlink message (service ID %u)",
+                  args->service_id);
+        nlmsg_free(msg);
+        free(payload);
+        return err;
+    }
+
+    log_info("DELIVER_BUNDLE: Received bundle and forwarding to kernel (service ID %u)",
+             args->service_id);
+
+    nlmsg_free(msg);
+    free(payload);
 
     return err;
 }

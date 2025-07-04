@@ -75,6 +75,7 @@ int daemon_start(Daemon *self) {
     log_info("Daemon terminated");
 
     daemon_free(self);
+    bp_detach();
 
     return 0;
 }

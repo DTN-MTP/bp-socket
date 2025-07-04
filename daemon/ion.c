@@ -3,54 +3,7 @@
 #include "sdr.h"
 #include <bp.h>
 #include <pthread.h>
-
-static struct sap_node *sap_list = NULL;
-static pthread_mutex_t sap_list_lock = PTHREAD_MUTEX_INITIALIZER;
-
-void sap_list_add(BpSAP sap, uint32_t node_id, uint32_t service_id) {
-    struct sap_node *node = calloc(1, sizeof(struct sap_node));
-    node->sap = sap;
-    node->node_id = node_id;
-    node->service_id = service_id;
-
-    pthread_mutex_lock(&sap_list_lock);
-    node->next = sap_list;
-    sap_list = node;
-    pthread_mutex_unlock(&sap_list_lock);
-}
-
-void sap_list_remove(BpSAP sap) {
-    pthread_mutex_lock(&sap_list_lock);
-
-    struct sap_node **p = &sap_list;
-    while (*p) {
-        if ((*p)->sap == sap) {
-            struct sap_node *to_delete = *p;
-            *p = (*p)->next;
-            free(to_delete);
-            break;
-        }
-        p = &(*p)->next;
-    }
-
-    pthread_mutex_unlock(&sap_list_lock);
-}
-
-BpSAP sap_list_find(uint32_t node_id, uint32_t service_id) {
-    pthread_mutex_lock(&sap_list_lock);
-
-    struct sap_node *n = sap_list;
-    while (n) {
-        if (n->node_id == node_id && n->service_id == service_id) {
-            pthread_mutex_unlock(&sap_list_lock);
-            return n->sap;
-        }
-        n = n->next;
-    }
-
-    pthread_mutex_unlock(&sap_list_lock);
-    return NULL;
-}
+#include "bp_receive_list.h"
 
 int bp_send_to_eid(char *payload, int payload_size, char *destEid, int eid_size) {
     Sdr sdr;
@@ -92,7 +45,7 @@ int bp_send_to_eid(char *payload, int payload_size, char *destEid, int eid_size)
 }
 
 BpIndResult bp_recv_once(int service_id, char **payload) {
-    BpSAP txSap;
+    BpSAP *txSap;
     BpDelivery dlv;
     Sdr sdr = getIonsdr();
     ZcoReader reader;
@@ -101,22 +54,28 @@ BpIndResult bp_recv_once(int service_id, char **payload) {
     int nodeNbr = getOwnNodeNbr();
     vast len;
 
+    txSap = malloc(sizeof(BpSAP));
+    if (!txSap) {
+        log_error("Failed to allocate BpSAP");
+        return -1;
+    }
+
     eid_size = snprintf(NULL, 0, "ipn:%d.%d", nodeNbr, service_id) + 1;
     eid = malloc(eid_size);
     if (!eid) {
         log_error("Failed to allocate EID");
-        return -1;
+        goto free_sap;
     }
     snprintf(eid, eid_size, "ipn:%d.%d", nodeNbr, service_id);
 
-    if (bp_open(eid, &txSap) < 0 || txSap == NULL) {
+    if (bp_open(eid, txSap) < 0) {
         log_error("Failed to open source endpoint.");
-        goto out;
+        goto free_eid;
     }
 
-    sap_list_add(txSap, nodeNbr, service_id);
+    bp_receive_list_add(nodeNbr, service_id, txSap);
 
-    if (bp_receive(txSap, &dlv, BP_BLOCKING) < 0) {
+    if (bp_receive(*txSap, &dlv, BP_BLOCKING) < 0) {
         log_error("Bundle reception failed.");
         goto out;
     }
@@ -144,33 +103,32 @@ BpIndResult bp_recv_once(int service_id, char **payload) {
             *payload = NULL;
             goto out;
         }
-
         break;
-
     case BpReceptionInterrupted:
-        goto out;
-
+        break;
     default:
         log_error("bp_recv_once: unexpected result %d", dlv.result);
-        goto out;
     }
 
 out:
-    sap_list_remove(txSap);
-    if (eid) free(eid);
-    bp_release_delivery(&dlv, 0);
-    bp_close(txSap);
+    bp_release_delivery(&dlv, 1);
+    bp_receive_list_remove(nodeNbr, service_id);
+    bp_close(*txSap);
+free_eid:
+    free(eid);
+free_sap:
+    free(txSap);
 
     return dlv.result;
 }
 
 void bp_cancel_recv_once(uint32_t node_id, uint32_t service_id) {
-    BpSAP sap = sap_list_find(node_id, service_id);
+    BpSAP* sap = bp_receive_list_find(node_id, service_id);
 
     if (sap == NULL) {
         log_error("bp_interrupt: BpSAP is NULL");
         return;
     }
 
-    bp_interrupt(sap);
+    bp_interrupt(*sap);
 }
