@@ -12,6 +12,69 @@
 #include "ion.h"
 #include "log.h"
 
+int handle_open_endpoint(Daemon *daemon, struct nlattr **attrs) {
+    if (!attrs[BP_GENL_A_NODE_ID] || !attrs[BP_GENL_A_SERVICE_ID]) {
+        log_error("Missing attribute(s) in OPEN_ENDPOINT");
+        return NL_SKIP;
+    }
+
+    uint32_t node_id = nla_get_u32(attrs[BP_GENL_A_NODE_ID]);
+    uint32_t service_id = nla_get_u32(attrs[BP_GENL_A_SERVICE_ID]);
+
+    // int ret = bp_open_and_register(node_id, service_id);
+    // if (ret < 0) {
+    //     log_error("Failed to open BP endpoint for node %u, service %u: %s", node_id, service_id,
+    //               strerror(-ret));
+    //     return ret;
+    // }
+
+    log_info("OPEN_ENDPOINT: opening BpSAP (service ID %u)", service_id);
+
+    return 0;
+}
+
+int handle_close_endpoint(Daemon *daemon, struct nlattr **attrs) {
+    if (!attrs[BP_GENL_A_NODE_ID] || !attrs[BP_GENL_A_SERVICE_ID]) {
+        log_error("Missing attribute(s) in CLOSE_ENDPOINT");
+        return NL_SKIP;
+    }
+
+    uint32_t node_id = nla_get_u32(attrs[BP_GENL_A_NODE_ID]);
+    uint32_t service_id = nla_get_u32(attrs[BP_GENL_A_SERVICE_ID]);
+
+    // int ret = bp_close_and_unregister(node_id, service_id);
+    // if (ret < 0) {
+    //     log_error("Failed to close BP endpoint for node %u, service %u", node_id, service_id);
+    //     return ret;
+    // }
+
+    log_info("CLOSE_ENDPOINT: closing BpSAP (service ID %u)", service_id);
+
+    return 0;
+}
+
+int handle_abort_endpoint(Daemon *, struct nlattr **attrs) {
+    if (!attrs[BP_GENL_A_SERVICE_ID] || !attrs[BP_GENL_A_NODE_ID]) {
+        log_error("Missing attribute(s) in ABORT_ENDPOINT");
+        return NL_SKIP;
+    }
+
+    uint32_t service_id = nla_get_u32(attrs[BP_GENL_A_SERVICE_ID]);
+    uint32_t node_id = nla_get_u32(attrs[BP_GENL_A_NODE_ID]);
+
+    // bp_cancel_recv_once(node_id, service_id);
+
+    // int ret = bp_close_and_unregister(node_id, service_id);
+    // if (ret < 0) {
+    //     log_error("Failed to close BP endpoint for node %u, service %u", node_id, service_id);
+    //     return ret;
+    // }
+
+    log_info("ABORT_ENDPOINT: abort request bundle and closing BpSAP (service ID %u)", service_id);
+
+    return 0;
+}
+
 int handle_send_bundle(Daemon *daemon, struct nlattr **attrs) {
     if (!attrs[BP_GENL_A_SOCKID] || !attrs[BP_GENL_A_PAYLOAD] || !attrs[BP_GENL_A_NODE_ID] ||
         !attrs[BP_GENL_A_SERVICE_ID]) {
@@ -44,7 +107,7 @@ int handle_request_bundle(Daemon *daemon, struct nlattr **attrs) {
     }
 
     uint32_t service_id = nla_get_u32(attrs[BP_GENL_A_SERVICE_ID]);
-    log_info("REQUEST_BUNDLE: Bundle request initiated (service ID %u)", service_id);
+    log_info("REQUEST_BUNDLE: bundle request initiated (service ID %u)", service_id);
 
     struct thread_args *args = malloc(sizeof(struct thread_args));
     if (!args) {
@@ -55,6 +118,7 @@ int handle_request_bundle(Daemon *daemon, struct nlattr **attrs) {
     args->service_id = service_id;
     args->netlink_sock = daemon->genl_bp_sock;
     args->netlink_family = daemon->genl_bp_family_id;
+    args->sdr = daemon->sdr;
 
     pthread_t thread;
     if (pthread_create(&thread, NULL, handle_recv_thread, args) != 0) {
@@ -71,23 +135,22 @@ int handle_request_bundle(Daemon *daemon, struct nlattr **attrs) {
 void *handle_recv_thread(void *arg) {
     struct thread_args *args = (struct thread_args *)arg;
     char *payload = NULL;
+    int payload_size;
 
-    switch (bp_recv_once(args->service_id, &payload)) {
-    case BpPayloadPresent:
-        handle_deliver_bundle(payload, args);
-        break;
-    case BpReceptionInterrupted:
-        log_info("Reception interrupted (service ID %u)", args->service_id);
-        break;
-    default:
-        log_error("Error receiving bundle (service ID %u)", args->service_id);
+    payload_size = bp_recv_once(args->sdr, args->service_id, &payload);
+    if (payload_size < 1) {
+        log_info("Exit recv thread (service ID %u)", args->service_id);
+        free(args);
+        return NULL;
     }
+
+    handle_deliver_bundle(payload, payload_size, args);
 
     free(args);
     return NULL;
 }
 
-int handle_deliver_bundle(char *payload, struct thread_args *args) {
+int handle_deliver_bundle(char *payload, int payload_size, struct thread_args *args) {
     int err = 0;
 
     struct nl_msg *msg = nlmsg_alloc();
@@ -100,7 +163,7 @@ int handle_deliver_bundle(char *payload, struct thread_args *args) {
     void *hdr = genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, args->netlink_family, 0, 0,
                             BP_GENL_CMD_DELIVER_BUNDLE, BP_GENL_VERSION);
     if (!hdr || nla_put_u32(msg, BP_GENL_A_SERVICE_ID, args->service_id) < 0 ||
-        nla_put(msg, BP_GENL_A_PAYLOAD, strlen(payload) + 1, payload) < 0) {
+        nla_put(msg, BP_GENL_A_PAYLOAD, payload_size, payload) < 0) {
         log_error("DELIVER_BUNDLE: Failed to construct Netlink reply");
         nlmsg_free(msg);
         free(payload);
@@ -116,27 +179,11 @@ int handle_deliver_bundle(char *payload, struct thread_args *args) {
         return err;
     }
 
-    log_info("DELIVER_BUNDLE: Received bundle and forwarding to kernel (service ID %u)",
+    log_info("DELIVER_BUNDLE: received bundle and forwarding to kernel (service ID %u)",
              args->service_id);
 
     nlmsg_free(msg);
     free(payload);
 
     return err;
-}
-
-int handle_cancel_request_bundle(Daemon *daemon, struct nlattr **attrs) {
-    if (!attrs[BP_GENL_A_SERVICE_ID] || !attrs[BP_GENL_A_NODE_ID]) {
-        log_error("Missing attribute(s) in CANCEL_REQUEST_BUNDLE");
-        return NL_SKIP;
-    }
-
-    uint32_t service_id = nla_get_u32(attrs[BP_GENL_A_SERVICE_ID]);
-    uint32_t node_id = nla_get_u32(attrs[BP_GENL_A_NODE_ID]);
-
-    bp_cancel_recv_once(node_id, service_id);
-
-    log_info("CANCEL_REQUEST_BUNDLE: Cancel bundle request (service ID %u)", service_id);
-
-    return 0;
 }

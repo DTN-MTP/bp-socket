@@ -18,7 +18,7 @@ void on_sigpipe(evutil_socket_t fd, short what, void *arg) {
     event_base_loopexit(base, NULL);
 }
 
-void on_netlink(int fd, short event, void *arg) {
+void on_netlink(evutil_socket_t fd, short event, void *arg) {
     Daemon *daemon = (Daemon *)arg;
     nl_recvmsgs_default(
         daemon->genl_bp_sock); // call the callback registered with genl_bp_sock_recvmsg_cb()
@@ -68,6 +68,7 @@ int daemon_start(Daemon *self) {
         daemon_free(self);
         return 1;
     }
+    self->sdr = bp_get_sdr();
     log_info("Successfully attached to ION");
 
     log_info("Daemon started successfully");

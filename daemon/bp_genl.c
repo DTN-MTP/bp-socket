@@ -66,12 +66,16 @@ int genl_bp_sock_recvmsg_cb(struct nl_msg *msg, void *arg) {
     }
 
     switch (genlhdr->cmd) {
+    case BP_GENL_CMD_OPEN_ENDPOINT:
+        return handle_open_endpoint(daemon, attrs);
+    case BP_GENL_CMD_CLOSE_ENDPOINT:
+        return handle_close_endpoint(daemon, attrs);
+    case BP_GENL_CMD_ABORT_ENDPOINT:
+        return handle_abort_endpoint(daemon, attrs);
     case BP_GENL_CMD_SEND_BUNDLE:
         return handle_send_bundle(daemon, attrs);
     case BP_GENL_CMD_REQUEST_BUNDLE:
         return handle_request_bundle(daemon, attrs);
-    case BP_GENL_CMD_CANCEL_REQUEST_BUNDLE:
-        return handle_cancel_request_bundle(daemon, attrs);
     default:
         log_error("Unknown GENL command: %d", genlhdr->cmd);
         return NL_SKIP;
