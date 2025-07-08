@@ -29,7 +29,10 @@ static struct sock* bp_alloc_socket(struct net* net, int kern)
 	bp = bp_sk(sk);
 	skb_queue_head_init(&bp->queue);
 	init_waitqueue_head(&bp->wait_queue);
-
+	bp->bp_node_id = 0;
+	bp->bp_service_id = 0;
+	bp->recv_aborted = false;
+	bp->has_bound = false;
 out:
 	return sk;
 }
@@ -132,8 +135,7 @@ int bp_bind(struct socket* sock, struct sockaddr* uaddr, int addr_len)
 		if (iter_bp->bp_service_id == service_id
 		    && iter_bp->bp_node_id == node_id) {
 			read_unlock_bh(&bp_list_lock);
-			err = -EADDRINUSE;
-			goto out;
+			return -EADDRINUSE;
 		}
 	}
 	read_unlock_bh(&bp_list_lock);
@@ -142,14 +144,21 @@ int bp_bind(struct socket* sock, struct sockaddr* uaddr, int addr_len)
 	bp = bp_sk(sk);
 	bp->bp_service_id = service_id;
 	bp->bp_node_id = node_id;
+
+	err = open_endpoint_doit(bp->bp_node_id, bp->bp_service_id, 8443);
+	if (err < 0) {
+		pr_err("bp_bind: open_endpoint_doit failed (%d)\n", err);
+		release_sock(sk);
+		return err;
+	}
+
 	write_lock_bh(&bp_list_lock);
 	sk_add_node(sk, &bp_list);
 	write_unlock_bh(&bp_list_lock);
 
-out:
+	bp->has_bound = true;
 	release_sock(sk);
-
-	return err;
+	return 0;
 }
 
 int bp_release(struct socket* sock)
@@ -163,6 +172,14 @@ int bp_release(struct socket* sock)
 	lock_sock(sk);
 	sock_orphan(sk);
 	bp = bp_sk(sk);
+
+	if (bp->has_bound && bp->recv_aborted) {
+		abort_endpoint_doit(bp->bp_node_id, bp->bp_service_id, 8443);
+	} else {
+		if (bp->has_bound)
+			close_endpoint_doit(
+			    bp->bp_node_id, bp->bp_service_id, 8443);
+	}
 
 	write_lock_bh(&bp_list_lock);
 	sk_del_node_init(sk);
@@ -247,13 +264,12 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 
 	ret = send_bundle_doit(
 	    sockid, (char*)payload, size, node_id, service_id, 8443);
-	kfree(payload);
-
 	if (ret < 0) {
 		pr_err("bp_sendmsg: send_bundle_doit failed (%d)\n", ret);
 		return ret;
 	}
 
+	kfree(payload);
 	return size;
 }
 
@@ -274,12 +290,7 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 	    bp->wait_queue, !skb_queue_empty(&bp->queue));
 	if (ret < 0) {
 		pr_err("bp_recvmsg: interrupted while waiting\n");
-		goto out_unlock;
-	}
-
-	if (sock_flag(sk, SOCK_DEAD)) {
-		pr_err("bp_recvmsg: socket closed while waiting\n");
-		ret = -ECONNRESET;
+		bp->recv_aborted = true;
 		goto out_unlock;
 	}
 

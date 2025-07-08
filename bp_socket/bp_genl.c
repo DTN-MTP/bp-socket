@@ -43,6 +43,142 @@ int fail_doit(struct sk_buff* skb, struct genl_info* info)
 	return -1;
 }
 
+int open_endpoint_doit(u32 node_id, u32 service_id, int port_id)
+{
+	int ret = 0;
+	void* hdr;
+	struct sk_buff* msg;
+	int msg_size;
+
+	/* Taille du message avec deux attributs */
+	msg_size = nla_total_size(sizeof(u32)) + nla_total_size(sizeof(u32));
+	msg = genlmsg_new(msg_size + GENL_HDRLEN, GFP_KERNEL);
+	if (!msg) {
+		pr_err("bp_open_request: failed to allocate message buffer\n");
+		return -ENOMEM;
+	}
+
+	hdr = genlmsg_put(msg, 0, 0, &genl_fam, 0, BP_GENL_CMD_OPEN_ENDPOINT);
+	if (!hdr) {
+		pr_err("bp_open_request: failed to create genetlink header\n");
+		nlmsg_free(msg);
+		return -EMSGSIZE;
+	}
+
+	ret = nla_put_u32(msg, BP_GENL_A_NODE_ID, node_id);
+	if (ret) {
+		pr_err("bp_open_request: failed to add NODE_ID\n");
+		goto fail;
+	}
+
+	ret = nla_put_u32(msg, BP_GENL_A_SERVICE_ID, service_id);
+	if (ret) {
+		pr_err("bp_open_request: failed to add SERVICE_ID\n");
+		goto fail;
+	}
+
+	genlmsg_end(msg, hdr);
+	ret = genlmsg_unicast(&init_net, msg, port_id);
+	if (ret != 0) {
+		pr_err("bp_open_request: genlmsg_unicast failed (%d)\n", ret);
+	}
+	return ret;
+
+fail:
+	genlmsg_cancel(msg, hdr);
+	nlmsg_free(msg);
+	return ret;
+}
+
+int close_endpoint_doit(u32 node_id, u32 service_id, int port_id)
+{
+	int ret = 0;
+	void* hdr;
+	struct sk_buff* msg;
+	int msg_size;
+
+	/* Compute total size of Netlink attributes */
+	msg_size = nla_total_size(sizeof(u32)) + nla_total_size(sizeof(u32));
+	/* Allocate a new buffer */
+	msg = genlmsg_new(msg_size + GENL_HDRLEN, GFP_KERNEL);
+	if (!msg) {
+		pr_err("bp_close_request: failed to allocate message buffer\n");
+		return -ENOMEM;
+	}
+	/* Generic Netlink header */
+	hdr = genlmsg_put(msg, 0, 0, &genl_fam, 0, BP_GENL_CMD_CLOSE_ENDPOINT);
+	if (!hdr) {
+		pr_err("bp_close_request: failed to create genetlink header\n");
+		nlmsg_free(msg);
+		return -EMSGSIZE;
+	}
+	/* And the message */
+	ret = nla_put_u32(msg, BP_GENL_A_NODE_ID, node_id);
+	if (ret) {
+		pr_err("bp_close_request: failed to put NODE_ID (%d)\n", ret);
+		goto fail;
+	}
+	ret = nla_put_u32(msg, BP_GENL_A_SERVICE_ID, service_id);
+	if (ret) {
+		pr_err(
+		    "bp_close_request: failed to put SERVICE_ID (%d)\n", ret);
+		goto fail;
+	}
+	genlmsg_end(msg, hdr);
+	ret = genlmsg_unicast(&init_net, msg, port_id);
+	if (ret != 0) {
+		pr_err("bp_close_request: genlmsg_unicast failed (%d)\n", ret);
+	}
+	return ret;
+fail:
+	genlmsg_cancel(msg, hdr);
+	nlmsg_free(msg);
+	return ret;
+}
+
+int abort_endpoint_doit(u32 node_id, u32 service_id, int port_id)
+{
+	int ret = 0;
+	void* hdr;
+	struct sk_buff* msg;
+	int msg_size;
+
+	msg_size = 2 * nla_total_size(sizeof(u32));
+	msg = genlmsg_new(msg_size + GENL_HDRLEN, GFP_KERNEL);
+	if (!msg) {
+		pr_err("cancel_bundle: failed to allocate message buffer\n");
+		return -ENOMEM;
+	}
+
+	hdr = genlmsg_put(msg, 0, 0, &genl_fam, 0, BP_GENL_CMD_ABORT_ENDPOINT);
+	if (!hdr) {
+		pr_err("cancel_bundle: failed to create genetlink header\n");
+		nlmsg_free(msg);
+		return -EMSGSIZE;
+	}
+
+	if ((ret = nla_put_u32(msg, BP_GENL_A_SERVICE_ID, service_id))) {
+		pr_err("cancel_bundle: failed to put service_id\n");
+		genlmsg_cancel(msg, hdr);
+		nlmsg_free(msg);
+		return ret;
+	}
+
+	if ((ret = nla_put_u32(msg, BP_GENL_A_NODE_ID, node_id))) {
+		pr_err("cancel_bundle: failed to put node_id\n");
+		genlmsg_cancel(msg, hdr);
+		nlmsg_free(msg);
+		return ret;
+	}
+
+	genlmsg_end(msg, hdr);
+	ret = genlmsg_unicast(&init_net, msg, port_id);
+	if (ret != 0) {
+		pr_err("cancel_bundle: unicast failed (%d)\n", ret);
+	}
+	return ret;
+}
+
 int send_bundle_doit(u64 sockid, const char* payload, int payload_size,
     u32 node_id, u32 service_id, int port_id)
 {
@@ -160,22 +296,15 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 	size_t payload_len;
 	struct sk_buff* new_skb;
 
-	pr_info("TRIGGER: received message\n");
-
-	if (!info->attrs[BP_GENL_A_SERVICE_ID]) {
-		pr_err("attribute missing from message\n");
+	if (!info->attrs[BP_GENL_A_SERVICE_ID]
+	    || !info->attrs[BP_GENL_A_PAYLOAD]) {
+		pr_err("deliver_bundle: missing required attributes\n");
 		return -EINVAL;
 	}
+
 	service_id = nla_get_u32(info->attrs[BP_GENL_A_SERVICE_ID]);
-
-	if (!info->attrs[BP_GENL_A_PAYLOAD]) {
-		pr_err("empty message received\n");
-		return -EINVAL;
-	}
 	payload = nla_data(info->attrs[BP_GENL_A_PAYLOAD]);
 	payload_len = nla_len(info->attrs[BP_GENL_A_PAYLOAD]);
-
-	pr_info("Message for service %d: %s\n", service_id, payload);
 
 	new_skb = alloc_skb(payload_len, GFP_KERNEL);
 	if (!new_skb) {
@@ -187,7 +316,7 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 	read_lock_bh(&bp_list_lock);
 	sk_for_each(sk, &bp_list)
 	{
-		lock_sock(sk);
+		bh_lock_sock(sk);
 		bp = bp_sk(sk);
 
 		if (bp->bp_service_id == service_id) {
@@ -195,10 +324,10 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 			skb_queue_tail(&bp->queue, new_skb);
 			if (waitqueue_active(&bp->wait_queue))
 				wake_up_interruptible(&bp->wait_queue);
-			release_sock(sk);
+			bh_unlock_sock(sk);
 			break;
 		}
-		release_sock(sk);
+		bh_unlock_sock(sk);
 	}
 	read_unlock_bh(&bp_list_lock);
 
