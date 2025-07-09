@@ -22,6 +22,7 @@ a scheme ipn 'ipnfw' 'ipnadminep'
 a endpoint ipn:10.0 q
 a endpoint ipn:10.1 q
 a endpoint ipn:10.2 q
+a endpoint ipn:10.42 q
 a protocol tcp 1400 100
 a induct tcp 192.168.50.10:4556 tcpcli
 a outduct tcp 192.168.50.20:4556 tcpclo

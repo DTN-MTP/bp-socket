@@ -249,9 +249,9 @@ python3 tools/aap2/aap2_receive.py --agentid 2 --socket ./ud3tn.aap2.socket.2
 
 ```bash
 # SSH into ion-node before
-cd /bp-socket/tools
-gcc -o bp-demo-sender bp-demo-sender.c
-./bp-demo-sender 20 2
+cd /bp-socket
+gcc -o sender sender.c
+./sender 20 2
 ```
 
 </details>
@@ -263,9 +263,9 @@ gcc -o bp-demo-sender bp-demo-sender.c
 
 ```bash
 # SSH into ion-node before
-cd /bp-socket/tools
-gcc -o bp-demo-receiver bp-demo-receiver.c
-./bp-demo-receiver 10 2
+cd /bp-socket
+gcc -o receiver receiver.c
+./receiver 10 2
 ```
 
 </details>
