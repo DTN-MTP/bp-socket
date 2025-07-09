@@ -90,7 +90,6 @@ int bp_bind(struct socket* sock, struct sockaddr* uaddr, int addr_len)
 	struct sockaddr_bp* addr = (struct sockaddr_bp*)uaddr;
 	int service_id = -1;
 	int node_id = -1;
-	int err = 0;
 
 	if (addr_len != sizeof(struct sockaddr_bp))
 		return -EINVAL;
@@ -132,8 +131,7 @@ int bp_bind(struct socket* sock, struct sockaddr* uaddr, int addr_len)
 		if (iter_bp->bp_service_id == service_id
 		    && iter_bp->bp_node_id == node_id) {
 			read_unlock_bh(&bp_list_lock);
-			err = -EADDRINUSE;
-			goto out;
+			return -EADDRINUSE;
 		}
 	}
 	read_unlock_bh(&bp_list_lock);
@@ -146,10 +144,8 @@ int bp_bind(struct socket* sock, struct sockaddr* uaddr, int addr_len)
 	sk_add_node(sk, &bp_list);
 	write_unlock_bh(&bp_list_lock);
 
-out:
 	release_sock(sk);
-
-	return err;
+	return 0;
 }
 
 int bp_release(struct socket* sock)
