@@ -7,6 +7,8 @@
 #include "af_bp.h"
 #include "bp_genl.h"
 
+#define BP_MAX_PAYLOAD (256 * 1024)
+
 HLIST_HEAD(bp_list);
 DEFINE_RWLOCK(bp_list_lock);
 
@@ -182,7 +184,7 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 	int ret;
 
 	if (!msg->msg_name) {
-		pr_err("bp_sendmsg: no destination address provided\n");
+		pr_err("bp_sendmsg: no destination address provided");
 		return -EINVAL;
 	}
 
@@ -213,28 +215,37 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 			return -EINVAL;
 		}
 		if (node_id < 1) {
-			pr_err("bp_sendmsg: invalid node ID (must be > 0)\n");
+			pr_err("bp_sendmsg: invalid node ID (must be > 0)");
 			return -EINVAL;
 		}
 		break;
 
 	case BP_SCHEME_DTN:
-		pr_err("bp_sendmsg: DTN scheme not supported\n");
+		pr_err("bp_sendmsg: DTN scheme not supported");
 		return -EAFNOSUPPORT;
 
 	default:
-		pr_err("bp_sendmsg: unknown scheme %d\n", addr->bp_scheme);
+		pr_err("bp_sendmsg: unknown scheme %d", addr->bp_scheme);
 		return -EINVAL;
+	}
+
+	if (size == 0) {
+		return 0;
+	}
+
+	if (size > BP_MAX_PAYLOAD) {
+		pr_err("bp_sendmsg: payload too big (%zu bytes)", size);
+		return -EMSGSIZE;
 	}
 
 	payload = kmalloc(size, GFP_KERNEL);
 	if (!payload) {
-		pr_err("bp_sendmsg: failed to allocate memory\n");
+		pr_err("bp_sendmsg: failed to allocate memory");
 		return -ENOMEM;
 	}
 
 	if (copy_from_iter(payload, size, &msg->msg_iter) != size) {
-		pr_err("bp_sendmsg: failed to copy data from user\n");
+		pr_err("bp_sendmsg: failed to copy data from user");
 		kfree(payload);
 		return -EFAULT;
 	}
@@ -246,7 +257,7 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 	kfree(payload);
 
 	if (ret < 0) {
-		pr_err("bp_sendmsg: send_bundle_doit failed (%d)\n", ret);
+		pr_err("bp_sendmsg: send_bundle_doit failed (%d)", ret);
 		return ret;
 	}
 
