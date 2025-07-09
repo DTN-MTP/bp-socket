@@ -1,7 +1,9 @@
 #ifndef ION_H
 #define ION_H
 
-int bp_send_to_eid(char *payload, int payload_size, char *eid, int eid_size);
-char *bp_recv_once(int service_id);
+#include "bp.h"
+
+int bp_send_to_eid(Sdr sdr, char *payload, int payload_size, char *dest_eid, int eid_size);
+int bp_recv_once(Sdr sdr, int service_id, char **payload);
 
 #endif

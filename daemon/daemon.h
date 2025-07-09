@@ -1,6 +1,7 @@
 #ifndef DAEMON_H
 #define DAEMON_H
 
+#include "bp.h"
 #include <event2/event.h>
 #include <netlink/socket.h>
 
@@ -9,6 +10,7 @@ typedef struct Daemon {
     char *genl_bp_family_name;
     int genl_bp_family_id;
     unsigned int nl_pid;
+    Sdr sdr;
 
     struct event_base *base;
     struct event *event_on_sigpipe;
