@@ -1,17 +1,28 @@
 #include "log.h"
 #include "sdr.h"
 #include <bp.h>
+#include <pthread.h>
 
-int bp_send_to_eid(char *payload, int payload_size, char *destEid, int eid_size) {
-    Sdr sdr;
+static pthread_mutex_t sdrmutex = PTHREAD_MUTEX_INITIALIZER;
+
+const char *bp_result_text(BpIndResult result) {
+    switch (result) {
+    case BpPayloadPresent:
+        return "BpPayloadPresent";
+    case BpReceptionTimedOut:
+        return "BpReceptionTimedOut";
+    case BpReceptionInterrupted:
+        return "BpReceptionInterrupted";
+    case BpEndpointStopped:
+        return "BpEndpointStopped";
+    default:
+        return "Unknown";
+    }
+}
+
+int bp_send_to_eid(Sdr sdr, char *payload, int payload_size, char *dest_eid, int eid_size) {
     Object sdrBuffer;
     Object zco;
-
-    sdr = bp_get_sdr();
-    if (sdr == NULL) {
-        log_error("*** Failed to get sdr.");
-        return 0;
-    }
 
     oK(sdr_begin_xn(sdr));
 
@@ -31,7 +42,7 @@ int bp_send_to_eid(char *payload, int payload_size, char *destEid, int eid_size)
         return 0;
     }
 
-    if (bp_send(NULL, destEid, NULL, 86400, BP_STD_PRIORITY, 0, 0, 0, NULL, zco, NULL) <= 0) {
+    if (bp_send(NULL, dest_eid, NULL, 86400, BP_STD_PRIORITY, 0, 0, 0, NULL, zco, NULL) <= 0) {
         sdr_end_xn(sdr);
         log_error("bp_send failed.");
         return 0;
@@ -41,64 +52,62 @@ int bp_send_to_eid(char *payload, int payload_size, char *destEid, int eid_size)
     return 1;
 }
 
-char *bp_recv_once(int service_id) {
-    BpSAP txSap;
+int bp_recv_once(Sdr sdr, int service_id, char **payload) {
+    BpSAP sap;
     BpDelivery dlv;
-    Sdr sdr = getIonsdr();
     ZcoReader reader;
-    char *eid = NULL;
-    char *payload = NULL;
+    int bundle_len;
+    int rc = -1;
     int eid_size;
+    char eid[64];
     int nodeNbr = getOwnNodeNbr();
-    vast len;
 
-    eid_size = snprintf(NULL, 0, "ipn:%d.%d", nodeNbr, service_id) + 1;
-    eid = malloc(eid_size);
-    if (!eid) {
-        log_error("Failed to allocate EID");
-        return NULL;
+    eid_size = snprintf(eid, sizeof(eid), "ipn:%d.%d", nodeNbr, service_id);
+    if (eid_size < 0 || eid_size >= sizeof(eid)) {
+        log_error("Failed to construct EID string.");
+        return -1;
     }
-    snprintf(eid, eid_size, "ipn:%d.%d", nodeNbr, service_id);
 
-    if (bp_open(eid, &txSap) < 0 || txSap == NULL) {
-        log_error("Failed to open source endpoint.");
+    if (bp_open(eid, &sap) < 0) {
+        log_error("bp_recv_once: Failed to open BpSAP for node_id=%d service_id=%d", nodeNbr,
+                  service_id);
+        return -1;
+    }
+
+    if (bp_receive(sap, &dlv, BP_BLOCKING) < 0) {
+        log_error("bp_recv_once: Bundle reception failed.");
         goto out;
     }
 
-    if (bp_receive(txSap, &dlv, BP_BLOCKING) < 0) {
-        log_error("Bundle reception failed.");
+    if (dlv.result != BpPayloadPresent || dlv.adu == 0) {
+        log_error("bp_recv_once: %s", bp_result_text(dlv.result));
         goto out;
     }
 
-    if (dlv.result != BpPayloadPresent) {
-        log_info("bp_recv_once: no payload");
+    if (pthread_mutex_lock(&sdrmutex) != 0) {
+        putErrmsg("Couldn't take sdr mutex.", NULL);
         goto out;
     }
 
-    if (!sdr_begin_xn(sdr)) goto out;
+    if (sdr_begin_xn(sdr) == 0) goto out;
 
-    int payload_size = zco_source_data_length(sdr, dlv.adu);
-    payload = malloc(payload_size);
-    if (!payload) {
-        log_error("Failed to allocate memory for payload");
-        sdr_exit_xn(sdr);
-        goto out;
+    bundle_len = zco_source_data_length(sdr, dlv.adu);
+    *payload = malloc(bundle_len);
+    if (!*payload) {
+        log_error("bp_recv_once: Failed to allocate memory for payload.");
+        goto unlock_sdr;
     }
 
     zco_start_receiving(dlv.adu, &reader);
-    len = zco_receive_source(sdr, &reader, payload_size, payload);
+    rc = zco_receive_source(sdr, &reader, bundle_len, *payload);
 
-    if (sdr_end_xn(sdr) < 0 || len < 0) {
-        log_error("Failed to read payload");
-        free(payload);
-        payload = NULL;
-        goto out;
-    }
+    sdr_end_xn(sdr);
+unlock_sdr:
+    pthread_mutex_unlock(&sdrmutex);
 
 out:
-    if (eid) free(eid);
     bp_release_delivery(&dlv, 0);
-    bp_close(txSap);
+    bp_close(sap);
 
-    return payload;
+    return rc;
 }

@@ -34,7 +34,7 @@ int handle_send_bundle(Daemon *daemon, struct nlattr **attrs) {
 
     log_info("SEND_BUNDLE: sockid=%lu, EID=%s, payload size=%d", sockid, eid, payload_size);
 
-    return bp_send_to_eid(payload, payload_size, eid, eid_size + 1);
+    return bp_send_to_eid(daemon->sdr, payload, payload_size, eid, eid_size + 1);
 }
 
 int handle_request_bundle(Daemon *daemon, struct nlattr **attrs) {
@@ -44,7 +44,7 @@ int handle_request_bundle(Daemon *daemon, struct nlattr **attrs) {
     }
 
     uint32_t service_id = nla_get_u32(attrs[BP_GENL_A_SERVICE_ID]);
-    log_info("REQUEST_BUNDLE: Bundle request initiated (service ID %u)", service_id);
+    log_info("REQUEST_BUNDLE: bundle request initiated (service ID %u)", service_id);
 
     struct thread_args *args = malloc(sizeof(struct thread_args));
     if (!args) {
@@ -55,9 +55,10 @@ int handle_request_bundle(Daemon *daemon, struct nlattr **attrs) {
     args->service_id = service_id;
     args->netlink_sock = daemon->genl_bp_sock;
     args->netlink_family = daemon->genl_bp_family_id;
+    args->sdr = daemon->sdr;
 
     pthread_t thread;
-    if (pthread_create(&thread, NULL, bp_recv_thread, args) != 0) {
+    if (pthread_create(&thread, NULL, handle_recv_thread, args) != 0) {
         log_error("Failed to create thread");
         free(args);
         return -1;
@@ -68,19 +69,26 @@ int handle_request_bundle(Daemon *daemon, struct nlattr **attrs) {
     return 0;
 }
 
-void *bp_recv_thread(void *arg) {
+void *handle_recv_thread(void *arg) {
     struct thread_args *args = (struct thread_args *)arg;
-    handle_deliver_bundle(args);
+    char *payload = NULL;
+    int payload_size;
+
+    payload_size = bp_recv_once(args->sdr, args->service_id, &payload);
+    if (payload_size < 0) {
+        log_info("Exit recv thread (service ID %u)", args->service_id);
+        free(args);
+        return NULL;
+    }
+
+    handle_deliver_bundle(payload, payload_size, args);
+
     free(args);
     return NULL;
 }
 
-int handle_deliver_bundle(struct thread_args *args) {
-    char *payload = bp_recv_once(args->service_id);
-    if (!payload) {
-        log_error("DELIVER_BUNDLE: No payload received (service ID %u)", args->service_id);
-        return -1;
-    }
+int handle_deliver_bundle(char *payload, int payload_size, struct thread_args *args) {
+    int err = 0;
 
     struct nl_msg *msg = nlmsg_alloc();
     if (!msg) {
@@ -92,23 +100,26 @@ int handle_deliver_bundle(struct thread_args *args) {
     void *hdr = genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, args->netlink_family, 0, 0,
                             BP_GENL_CMD_DELIVER_BUNDLE, BP_GENL_VERSION);
     if (!hdr || nla_put_u32(msg, BP_GENL_A_SERVICE_ID, args->service_id) < 0 ||
-        nla_put(msg, BP_GENL_A_PAYLOAD, strlen(payload) + 1, payload) < 0) {
+        nla_put(msg, BP_GENL_A_PAYLOAD, payload_size, payload) < 0) {
         log_error("DELIVER_BUNDLE: Failed to construct Netlink reply");
         nlmsg_free(msg);
         free(payload);
         return -EMSGSIZE;
     }
 
-    int err = nl_send_auto(args->netlink_sock, msg);
-    nlmsg_free(msg);
-    free(payload);
-
+    err = nl_send_auto(args->netlink_sock, msg);
     if (err < 0) {
         log_error("DELIVER_BUNDLE: Failed to send Netlink message (service ID %u)",
                   args->service_id);
+        nlmsg_free(msg);
+        free(payload);
         return err;
     }
 
-    log_info("DELIVER_BUNDLE: Bundle successfully delivered (service ID %u)", args->service_id);
-    return 0;
+    log_info("DELIVER_BUNDLE: received bundle and forwarding to kernel (service ID %u)",
+             args->service_id);
+
+    nlmsg_free(msg);
+    free(payload);
+    return err;
 }
