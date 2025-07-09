@@ -162,16 +162,12 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 
 	pr_info("TRIGGER: received message\n");
 
-	if (!info->attrs[BP_GENL_A_SERVICE_ID]) {
-		pr_err("attribute missing from message\n");
+	if (!info->attrs[BP_GENL_A_SERVICE_ID]
+	    || !info->attrs[BP_GENL_A_PAYLOAD]) {
+		pr_err("deliver_bundle: missing required attributes\n");
 		return -EINVAL;
 	}
 	service_id = nla_get_u32(info->attrs[BP_GENL_A_SERVICE_ID]);
-
-	if (!info->attrs[BP_GENL_A_PAYLOAD]) {
-		pr_err("empty message received\n");
-		return -EINVAL;
-	}
 	payload = nla_data(info->attrs[BP_GENL_A_PAYLOAD]);
 	payload_len = nla_len(info->attrs[BP_GENL_A_PAYLOAD]);
 
@@ -187,7 +183,7 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 	read_lock_bh(&bp_list_lock);
 	sk_for_each(sk, &bp_list)
 	{
-		lock_sock(sk);
+		bh_lock_sock(sk);
 		bp = bp_sk(sk);
 
 		if (bp->bp_service_id == service_id) {
@@ -195,10 +191,10 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 			skb_queue_tail(&bp->queue, new_skb);
 			if (waitqueue_active(&bp->wait_queue))
 				wake_up_interruptible(&bp->wait_queue);
-			release_sock(sk);
+			bh_unlock_sock(sk);
 			break;
 		}
-		release_sock(sk);
+		bh_unlock_sock(sk);
 	}
 	read_unlock_bh(&bp_list_lock);
 
