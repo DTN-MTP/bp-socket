@@ -230,7 +230,7 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 	node_id = addr->bp_addr.ipn.node_id;
 
 	// https://www.rfc-editor.org/rfc/rfc9758.html#name-node-numbers
-	if (node_id < 0 || node_id > 0xFFFFFFFF) {
+	if (node_id > 0xFFFFFFFF) {
 		pr_err("bp_bind: invalid node ID (must be in [0;2^31])");
 		ret = -EINVAL;
 		goto out;
