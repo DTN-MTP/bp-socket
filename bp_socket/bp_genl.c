@@ -43,8 +43,8 @@ int fail_doit(struct sk_buff* skb, struct genl_info* info)
 	return -1;
 }
 
-int send_bundle_doit(u64 sockid, const char* payload, int payload_size,
-    u32 node_id, u32 service_id, int port_id)
+int send_bundle_doit(u64 sockid, void* payload, int payload_size,
+    u_int32_t node_id, u_int32_t service_id, int port_id)
 {
 	int ret = 0;
 	void* hdr;
@@ -108,7 +108,7 @@ fail:
 	return ret;
 }
 
-int request_bundle_doit(u32 service_id, int port_id)
+int request_bundle_doit(u_int32_t node_id, u_int32_t service_id, int port_id)
 {
 	int ret = 0;
 	void* hdr;
