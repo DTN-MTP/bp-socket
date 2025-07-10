@@ -21,18 +21,19 @@ struct proto bp_proto = {
 static struct sock* bp_alloc_socket(struct net* net, int kern)
 {
 	struct bp_sock* bp;
-	struct sock* sk = sk_alloc(net, AF_BP, GFP_KERNEL, &bp_proto, 1);
+	struct sock* sk;
 
-	if (!sk)
-		goto out;
+	sk = sk_alloc(net, AF_BP, GFP_KERNEL, &bp_proto, 1);
+	if (sk) {
+		sock_init_data(NULL, sk);
 
-	sock_init_data(NULL, sk);
+		bp = bp_sk(sk);
+		skb_queue_head_init(&bp->queue);
+		init_waitqueue_head(&bp->wait_queue);
+		bp->bp_node_id = 0;
+		bp->bp_service_id = 0;
+	}
 
-	bp = bp_sk(sk);
-	skb_queue_head_init(&bp->queue);
-	init_waitqueue_head(&bp->wait_queue);
-
-out:
 	return sk;
 }
 
@@ -65,14 +66,17 @@ int bp_create(struct net* net, struct socket* sock, int protocol, int kern)
 {
 	struct sock* sk;
 	struct bp_sock* bp;
-	int rc = -EAFNOSUPPORT;
+	int ret;
 
-	if (!net_eq(net, &init_net))
+	if (!net_eq(net, &init_net)) {
+		ret = -EOPNOTSUPP;
 		goto out;
+	}
 
-	rc = -ENOMEM;
-	if ((sk = bp_alloc_socket(net, kern)) == NULL)
+	if ((sk = bp_alloc_socket(net, kern)) == NULL) {
+		ret = -ENOMEM;
 		goto out;
+	}
 
 	bp = bp_sk(sk);
 	sock_init_data(sock, sk);
@@ -80,50 +84,57 @@ int bp_create(struct net* net, struct socket* sock, int protocol, int kern)
 	sock->ops = &bp_proto_ops;
 	sk->sk_protocol = protocol;
 
-	rc = 0;
+	return 0;
+
 out:
-	return rc;
+	return ret;
 }
 
 int bp_bind(struct socket* sock, struct sockaddr* uaddr, int addr_len)
 {
-	struct sock *iter_sk, *sk = sock->sk;
+	struct sock *iter_sk, *sk;
 	struct bp_sock *iter_bp, *bp;
-	struct sockaddr_bp* addr = (struct sockaddr_bp*)uaddr;
-	int service_id = -1;
-	int node_id = -1;
+	struct sockaddr_bp* addr;
+	u_int32_t service_id;
+	u_int32_t node_id;
+	int ret;
 
-	if (addr_len != sizeof(struct sockaddr_bp))
-		return -EINVAL;
+	sk = sock->sk;
+	addr = (struct sockaddr_bp*)uaddr;
+	service_id = addr->bp_addr.ipn.service_id;
+	node_id = addr->bp_addr.ipn.node_id;
 
-	if (addr->bp_family != AF_BP)
-		return -EINVAL;
+	if (addr_len != sizeof(struct sockaddr_bp)) {
+		ret = -EINVAL;
+		goto out;
+	}
 
-	switch (addr->bp_scheme) {
-	case BP_SCHEME_IPN:
-		service_id = addr->bp_addr.ipn.service_id;
-		node_id = addr->bp_addr.ipn.node_id;
+	if (addr->bp_family != AF_BP) {
+		ret = -EINVAL;
+		goto out;
+	}
 
-		if (service_id < 1 || service_id > 255) {
-			pr_err("bp_bind: invalid service ID %d (must be in "
-			       "[1,255])\n",
-			    service_id);
-			return -EINVAL;
-		}
+	if (addr->bp_scheme != BP_SCHEME_IPN) {
+		pr_err("bp_bind: unsupported address scheme %d\n",
+		    addr->bp_scheme);
+		ret = -EAFNOSUPPORT;
+		goto out;
+	}
 
-		if (node_id < 1) {
-			pr_err("bp_bind: invalid node ID (must be > 0)\n");
-			return -EINVAL;
-		}
+	// https://www.rfc-editor.org/rfc/rfc9758.html#name-node-numbers
+	if (node_id > 0xFFFFFFFF) {
+		pr_err("bp_bind: invalid node ID (must be in [0;2^31])\n");
+		ret = -EINVAL;
+		goto out;
+	}
 
-		break;
-
-	case BP_SCHEME_DTN:
-		pr_err("bp_bind: DTN scheme not supported\n");
-		return -EAFNOSUPPORT;
-	default:
-		pr_err("bp_bind: unknown scheme %d\n", addr->bp_scheme);
-		return -EINVAL;
+	// https://www.rfc-editor.org/rfc/rfc9758.html#name-service-numbers
+	if (service_id < 1 || service_id > 0xFFFFFFFF) {
+		pr_err("bp_bind: invalid service ID %d (must be in "
+		       "[1;2^31])\n",
+		    service_id);
+		ret = -EINVAL;
+		goto out;
 	}
 
 	read_lock_bh(&bp_list_lock);
@@ -133,7 +144,8 @@ int bp_bind(struct socket* sock, struct sockaddr* uaddr, int addr_len)
 		if (iter_bp->bp_service_id == service_id
 		    && iter_bp->bp_node_id == node_id) {
 			read_unlock_bh(&bp_list_lock);
-			return -EADDRINUSE;
+			ret = -EADDRINUSE;
+			goto out;
 		}
 	}
 	read_unlock_bh(&bp_list_lock);
@@ -145,9 +157,12 @@ int bp_bind(struct socket* sock, struct sockaddr* uaddr, int addr_len)
 	write_lock_bh(&bp_list_lock);
 	sk_add_node(sk, &bp_list);
 	write_unlock_bh(&bp_list_lock);
-
 	release_sock(sk);
+
 	return 0;
+
+out:
+	return ret;
 }
 
 int bp_release(struct socket* sock)
@@ -155,21 +170,20 @@ int bp_release(struct socket* sock)
 	struct sock* sk = sock->sk;
 	struct bp_sock* bp;
 
-	if (!sk)
-		return 0;
+	if (sk) {
+		lock_sock(sk);
+		sock_orphan(sk);
+		bp = bp_sk(sk);
 
-	lock_sock(sk);
-	sock_orphan(sk);
-	bp = bp_sk(sk);
+		write_lock_bh(&bp_list_lock);
+		sk_del_node_init(sk);
+		write_unlock_bh(&bp_list_lock);
+		skb_queue_purge(&bp->queue);
 
-	write_lock_bh(&bp_list_lock);
-	sk_del_node_init(sk);
-	write_unlock_bh(&bp_list_lock);
-	skb_queue_purge(&bp->queue);
-
-	sock->sk = NULL;
-	release_sock(sk);
-	sock_put(sk);
+		sock->sk = NULL;
+		release_sock(sk);
+		sock_put(sk);
+	}
 
 	return 0;
 }
@@ -178,21 +192,22 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 {
 	struct sockaddr_bp* addr;
 	void* payload;
-	uintptr_t sockid;
-	int service_id = -1;
-	int node_id = -1;
+	u_int32_t service_id;
+	u_int32_t node_id;
 	int ret;
 
 	if (!msg->msg_name) {
-		pr_err("bp_sendmsg: no destination address provided");
-		return -EINVAL;
+		pr_err("bp_sendmsg: no destination address provided\n");
+		ret = -EINVAL;
+		goto out;
 	}
 
 	if (msg->msg_namelen < sizeof(struct sockaddr_bp)) {
 		pr_err("bp_sendmsg: address length too short (expected: %zu, "
 		       "provided: %u)\n",
 		    sizeof(struct sockaddr_bp), msg->msg_namelen);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto out;
 	}
 
 	addr = (struct sockaddr_bp*)msg->msg_name;
@@ -200,102 +215,110 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 	if (addr->bp_family != AF_BP) {
 		pr_err("bp_sendmsg: unsupported address family %d\n",
 		    addr->bp_family);
-		return -EAFNOSUPPORT;
+		ret = -EAFNOSUPPORT;
+		goto out;
 	}
 
-	switch (addr->bp_scheme) {
-	case BP_SCHEME_IPN:
-		service_id = addr->bp_addr.ipn.service_id;
-		node_id = addr->bp_addr.ipn.node_id;
-
-		if (service_id < 1 || service_id > 255) {
-			pr_err("bp_sendmsg: invalid service ID %d (must be in "
-			       "[1,255])\n",
-			    service_id);
-			return -EINVAL;
-		}
-		if (node_id < 1) {
-			pr_err("bp_sendmsg: invalid node ID (must be > 0)");
-			return -EINVAL;
-		}
-		break;
-
-	case BP_SCHEME_DTN:
-		pr_err("bp_sendmsg: DTN scheme not supported");
-		return -EAFNOSUPPORT;
-
-	default:
-		pr_err("bp_sendmsg: unknown scheme %d", addr->bp_scheme);
-		return -EINVAL;
+	if (addr->bp_scheme != BP_SCHEME_IPN) {
+		pr_err("bp_sendmsg: unsupported address scheme %d\n",
+		    addr->bp_scheme);
+		ret = -EAFNOSUPPORT;
+		goto out;
 	}
 
-	if (size == 0) {
-		return 0;
+	service_id = addr->bp_addr.ipn.service_id;
+	node_id = addr->bp_addr.ipn.node_id;
+
+	// https://www.rfc-editor.org/rfc/rfc9758.html#name-node-numbers
+	if (node_id > 0xFFFFFFFF) {
+		pr_err("bp_bind: invalid node ID (must be in [0;2^31])\n");
+		ret = -EINVAL;
+		goto out;
+	}
+
+	// https://www.rfc-editor.org/rfc/rfc9758.html#name-service-numbers
+	if (service_id < 1 || service_id > 0xFFFFFFFF) {
+		pr_err("bp_bind: invalid service ID %d (must be in "
+		       "[1;2^31])\n",
+		    service_id);
+		ret = -EINVAL;
+		goto out;
 	}
 
 	if (size > BP_MAX_PAYLOAD) {
-		pr_err("bp_sendmsg: payload too big (%zu bytes)", size);
-		return -EMSGSIZE;
+		pr_err("bp_sendmsg: payload too big (%zu bytes)\n", size);
+		ret = -EMSGSIZE;
+		goto out;
 	}
 
-	payload = kmalloc(size, GFP_KERNEL);
-	if (!payload) {
-		pr_err("bp_sendmsg: failed to allocate memory");
-		return -ENOMEM;
-	}
+	if (size > 0) {
+		payload = kmalloc(size, GFP_KERNEL);
+		if (!payload) {
+			pr_err("bp_sendmsg: failed to allocate memory\n");
+			ret = -ENOMEM;
+			goto out;
+		}
 
-	if (copy_from_iter(payload, size, &msg->msg_iter) != size) {
-		pr_err("bp_sendmsg: failed to copy data from user");
+		if (copy_from_iter(payload, size, &msg->msg_iter) != size) {
+			pr_err("bp_sendmsg: failed to copy data from user\n");
+			ret = -EFAULT;
+			goto err_free;
+		}
+
+		ret = send_bundle_doit((uintptr_t)sock->sk->sk_socket, payload,
+		    size, node_id, service_id, 8443);
+		if (ret < 0) {
+			pr_err(
+			    "bp_sendmsg: send_bundle_doit failed (%d)\n", ret);
+			goto err_free;
+		}
+
 		kfree(payload);
-		return -EFAULT;
-	}
-
-	sockid = (uintptr_t)sock->sk->sk_socket;
-
-	ret = send_bundle_doit(
-	    sockid, (char*)payload, size, node_id, service_id, 8443);
-	kfree(payload);
-
-	if (ret < 0) {
-		pr_err("bp_sendmsg: send_bundle_doit failed (%d)", ret);
-		return ret;
 	}
 
 	return size;
+
+err_free:
+	kfree(payload);
+out:
+	return ret;
 }
 
 int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 {
-	struct sock* sk = sock->sk;
+	struct sock* sk;
 	struct bp_sock* bp;
 	struct sk_buff* skb;
-	u32 service_id;
 	int ret;
 
+	sk = sock->sk;
 	lock_sock(sk);
 	bp = bp_sk(sk);
-	service_id = bp->bp_service_id;
-	request_bundle_doit(bp->bp_service_id, 8443);
+	ret = request_bundle_doit(bp->bp_node_id, bp->bp_service_id, 8443);
+	if (ret < 0) {
+		pr_err("bp_recvmsg: request_bundle_doit failed (%d)\n", ret);
+		goto out;
+	}
 
 	ret = wait_event_interruptible(
 	    bp->wait_queue, !skb_queue_empty(&bp->queue));
 	if (ret < 0) {
 		pr_err("bp_recvmsg: interrupted while waiting\n");
-		goto out_unlock;
+		goto out;
 	}
 
 	if (sock_flag(sk, SOCK_DEAD)) {
 		pr_err("bp_recvmsg: socket closed while waiting\n");
-		ret = -ECONNRESET;
-		goto out_unlock;
+		ret = -ESHUTDOWN;
+		goto out;
 	}
 
 	skb = skb_dequeue(&bp->queue);
 	if (!skb) {
 		pr_info("bp_recvmsg: no messages in the queue for service %d\n",
-		    service_id);
-		ret = -EAGAIN;
-		goto out_unlock;
+		    bp->bp_service_id);
+		ret = -ENOMSG;
+		goto out;
 	}
 
 	if (skb->len > size) {
@@ -303,21 +326,20 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 		       "provided=%zu)\n",
 		    skb->len, size);
 		ret = -EMSGSIZE;
-		goto out_free_skb;
+		goto out;
 	}
 
 	if (copy_to_iter(skb->data, skb->len, &msg->msg_iter) != skb->len) {
 		pr_err("bp_recvmsg: failed to copy data to user space\n");
 		ret = -EFAULT;
-		goto out_free_skb;
+		goto out;
 	}
 
 	ret = skb->len;
 
-out_free_skb:
-	kfree_skb(skb);
-out_unlock:
+out:
+	if (skb)
+		kfree_skb(skb);
 	release_sock(sk);
-
 	return ret;
 }

@@ -15,48 +15,45 @@
 static int __init bp_init(void)
 {
 	int ret;
-	int rc;
-
-	pr_info("bp_init: initializing module\n");
 
 	/* generic netlink */
 	ret = genl_register_family(&genl_fam);
 	if (unlikely(ret)) {
-		pr_crit("bp_init: failed to register generic netlink family\n");
-		return ret;
+		pr_err("bp_init: failed to register generic netlink family\n");
+		goto out;
 	}
 
 	/* protocol */
-	rc = proto_register(&bp_proto, 0);
-	if (rc) {
+	ret = proto_register(&bp_proto, 0);
+	if (ret) {
 		pr_err("bp_init: failed to register proto\n");
-		return rc;
+		goto out;
 	}
 
-	rc = sock_register(&bp_family_ops);
-	if (rc) {
+	ret = sock_register(&bp_family_ops);
+	if (ret) {
 		pr_err("bp_init: failed to register socket family\n");
-		proto_unregister(&bp_proto);
-		return rc;
+		goto err_unreg_proto;
 	}
 
-	pr_info("bp_init: module initialized successfully\n");
 	return 0;
+
+err_unreg_proto:
+	proto_unregister(&bp_proto);
+out:
+	pr_err("bp_init: module initialization failed\n");
+	return ret;
 }
 
 static void __exit bp_exit(void)
 {
-	pr_info("bp_exit: unloading module\n");
 	sock_unregister(AF_BP);
 	proto_unregister(&bp_proto);
 
 	if (unlikely(genl_unregister_family(&genl_fam))) {
 		pr_err(
 		    "bp_init: failed to unregister generic netlink family\n");
-		return;
 	}
-
-	pr_info("bp_exit: module unloaded successfully\n");
 }
 
 module_init(bp_init);
@@ -64,5 +61,5 @@ module_exit(bp_exit);
 
 // Module metadata
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Your Name");
-MODULE_DESCRIPTION("Custom socket protocol module");
+MODULE_AUTHOR("Sylvain Pierrot");
+MODULE_DESCRIPTION("A socket family for the Bundle Protocol (BP)");

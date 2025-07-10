@@ -36,117 +36,103 @@ struct genl_family genl_fam = {
 	.n_mcgrps = ARRAY_SIZE(genl_mcgrps),
 };
 
-int fail_doit(struct sk_buff* skb, struct genl_info* info)
+int send_bundle_doit(u64 sockid, void* payload, int payload_size,
+    u_int32_t node_id, u_int32_t service_id, int port_id)
 {
-	pr_alert("Kernel receieved an SSA netlink notification. This should "
-		 "never happen.\n");
-	return -1;
-}
-
-int send_bundle_doit(u64 sockid, const char* payload, int payload_size,
-    u32 node_id, u32 service_id, int port_id)
-{
-	int ret = 0;
-	void* hdr;
+	void* msg_head;
 	struct sk_buff* msg;
-	int msg_size;
+	size_t msg_size;
+	int ret;
 
-	/* Compute total size of Netlink attributes */
-	msg_size = nla_total_size(sizeof(u64)) + nla_total_size(sizeof(u32))
-	    + nla_total_size(sizeof(u32)) + nla_total_size(payload_size);
-
-	/* Allocate a new buffer */
-	msg = genlmsg_new(msg_size + GENL_HDRLEN, GFP_KERNEL);
+	msg_size = nla_total_size(sizeof(u64))
+	    + nla_total_size(sizeof(u_int32_t))
+	    + nla_total_size(sizeof(u_int32_t)) + nla_total_size(payload_size);
+	msg = genlmsg_new(msg_size, GFP_KERNEL);
 	if (!msg) {
 		pr_err("send_bundle: failed to allocate message buffer\n");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto out;
 	}
 
-	/* Generic Netlink header */
-	hdr = genlmsg_put(msg, 0, 0, &genl_fam, 0, BP_GENL_CMD_SEND_BUNDLE);
-	if (!hdr) {
+	msg_head
+	    = genlmsg_put(msg, 0, 0, &genl_fam, 0, BP_GENL_CMD_SEND_BUNDLE);
+	if (!msg_head) {
 		pr_err("send_bundle: failed to create genetlink header\n");
-		nlmsg_free(msg);
-		return -EMSGSIZE;
+		ret = -EMSGSIZE;
+		goto err_free;
 	}
 
-	/* And the message */
 	ret = nla_put_u64_64bit(msg, BP_GENL_A_SOCKID, sockid, 0);
 	if (ret) {
 		pr_err("send_bundle: failed to put SOCKID (%d)\n", ret);
-		goto fail;
+		goto err_cancel;
 	}
 
 	ret = nla_put_u32(msg, BP_GENL_A_NODE_ID, node_id);
 	if (ret) {
 		pr_err("send_bundle: failed to put NODE_ID (%d)\n", ret);
-		goto fail;
+		goto err_cancel;
 	}
 
 	ret = nla_put_u32(msg, BP_GENL_A_SERVICE_ID, service_id);
 	if (ret) {
 		pr_err("send_bundle: failed to put SERVICE_ID (%d)\n", ret);
-		goto fail;
+		goto err_cancel;
 	}
 
 	ret = nla_put(msg, BP_GENL_A_PAYLOAD, payload_size, payload);
 	if (ret) {
 		pr_err("send_bundle: failed to put PAYLOAD (%d)\n", ret);
-		goto fail;
+		goto err_cancel;
 	}
 
-	genlmsg_end(msg, hdr);
-	ret = genlmsg_unicast(&init_net, msg, port_id);
-	if (ret != 0) {
-		pr_err("send_bundle: genlmsg_unicast failed (%d)\n", ret);
-	}
-	return ret;
+	genlmsg_end(msg, msg_head);
+	return genlmsg_unicast(&init_net, msg, port_id);
 
-fail:
-	genlmsg_cancel(msg, hdr);
+err_cancel:
+	genlmsg_cancel(msg, msg_head);
+err_free:
 	nlmsg_free(msg);
+out:
 	return ret;
 }
 
-int request_bundle_doit(u32 service_id, int port_id)
+int request_bundle_doit(u_int32_t node_id, u_int32_t service_id, int port_id)
 {
-	int ret = 0;
-	void* hdr;
+	void* msg_head;
 	struct sk_buff* msg;
-	int msg_size;
+	size_t msg_size;
+	int ret;
 
-	/* Allocate a new buffer for the reply */
 	msg_size = nla_total_size(sizeof(u32));
-	msg = genlmsg_new(msg_size + GENL_HDRLEN, GFP_KERNEL);
+	msg = genlmsg_new(msg_size, GFP_KERNEL);
 	if (!msg) {
-		pr_err("failed to allocate message buffer\n");
-		return -ENOMEM;
-	}
-
-	/* Put the Generic Netlink header */
-	hdr = genlmsg_put(msg, 0, 0, &genl_fam, 0, BP_GENL_CMD_REQUEST_BUNDLE);
-	if (!hdr) {
-		pr_err("failed to create genetlink header\n");
-		nlmsg_free(msg);
-		return -EMSGSIZE;
-	}
-
-	/* And the message */
-	if ((ret = nla_put_u32(msg, BP_GENL_A_SERVICE_ID, service_id))) {
-		pr_err("failed to create message string\n");
-		genlmsg_cancel(msg, hdr);
-		nlmsg_free(msg);
+		pr_err("request_bundle: failed to allocate message buffer\n");
+		ret = -ENOMEM;
 		goto out;
 	}
 
-	/* Finalize the message and send it */
-	genlmsg_end(msg, hdr);
-	ret = genlmsg_unicast(&init_net, msg, port_id);
-	if (ret != 0) {
-		pr_alert("Failed in gemlmsg_unicast [setsockopt notify]\n (%d)",
-		    ret);
+	msg_head
+	    = genlmsg_put(msg, 0, 0, &genl_fam, 0, BP_GENL_CMD_REQUEST_BUNDLE);
+	if (!msg_head) {
+		pr_err("request_bundle: failed to create genetlink header\n");
+		ret = -EMSGSIZE;
+		goto err_free;
 	}
 
+	ret = nla_put_u32(msg, BP_GENL_A_SERVICE_ID, service_id);
+	if (ret) {
+		pr_err("request_bundle: failed to put SERVICE_ID (%d)\n", ret);
+		goto err_cancel;
+	}
+
+	genlmsg_end(msg, msg_head);
+	return genlmsg_unicast(&init_net, msg, port_id);
+
+err_cancel:
+	genlmsg_cancel(msg, msg_head);
+err_free:
+	nlmsg_free(msg);
 out:
 	return ret;
 }
@@ -155,15 +141,18 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 {
 	struct sock* sk;
 	struct bp_sock* bp;
-	u32 service_id;
-	char* payload;
-	size_t payload_len;
 	struct sk_buff* new_skb;
+	bool new_skb_queued = false;
+	u_int32_t service_id;
+	void* payload;
+	size_t payload_len;
+	int ret;
 
 	if (!info->attrs[BP_GENL_A_SERVICE_ID]
 	    || !info->attrs[BP_GENL_A_PAYLOAD]) {
 		pr_err("deliver_bundle: missing required attributes\n");
-		return -EINVAL;
+		ret = -EINVAL;
+		goto out;
 	}
 	service_id = nla_get_u32(info->attrs[BP_GENL_A_SERVICE_ID]);
 	payload = nla_data(info->attrs[BP_GENL_A_PAYLOAD]);
@@ -172,7 +161,8 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 	new_skb = alloc_skb(payload_len, GFP_KERNEL);
 	if (!new_skb) {
 		pr_err("Failed to allocate sk_buff for payload\n");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto out;
 	}
 	skb_put_data(new_skb, payload, payload_len);
 
@@ -185,6 +175,7 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 		if (bp->bp_service_id == service_id) {
 
 			skb_queue_tail(&bp->queue, new_skb);
+			new_skb_queued = true;
 			if (waitqueue_active(&bp->wait_queue))
 				wake_up_interruptible(&bp->wait_queue);
 			bh_unlock_sock(sk);
@@ -194,5 +185,17 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 	}
 	read_unlock_bh(&bp_list_lock);
 
+	if (!new_skb_queued) {
+		pr_err("deliver_bundle: no socket found for service ID %d\n",
+		    service_id);
+		ret = -ENODEV;
+		goto err_free;
+	}
+
 	return 0;
+
+err_free:
+	kfree_skb(new_skb);
+out:
+	return ret;
 }
