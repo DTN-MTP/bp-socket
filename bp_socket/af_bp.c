@@ -197,7 +197,7 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 	int ret;
 
 	if (!msg->msg_name) {
-		pr_err("bp_sendmsg: no destination address provided");
+		pr_err("bp_sendmsg: no destination address provided\n");
 		ret = -EINVAL;
 		goto out;
 	}
@@ -231,7 +231,7 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 
 	// https://www.rfc-editor.org/rfc/rfc9758.html#name-node-numbers
 	if (node_id > 0xFFFFFFFF) {
-		pr_err("bp_bind: invalid node ID (must be in [0;2^31])");
+		pr_err("bp_bind: invalid node ID (must be in [0;2^31])\n");
 		ret = -EINVAL;
 		goto out;
 	}
@@ -239,14 +239,14 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 	// https://www.rfc-editor.org/rfc/rfc9758.html#name-service-numbers
 	if (service_id < 1 || service_id > 0xFFFFFFFF) {
 		pr_err("bp_bind: invalid service ID %d (must be in "
-		       "[1;2^31])",
+		       "[1;2^31])\n",
 		    service_id);
 		ret = -EINVAL;
 		goto out;
 	}
 
 	if (size > BP_MAX_PAYLOAD) {
-		pr_err("bp_sendmsg: payload too big (%zu bytes)", size);
+		pr_err("bp_sendmsg: payload too big (%zu bytes)\n", size);
 		ret = -EMSGSIZE;
 		goto out;
 	}
@@ -254,13 +254,13 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 	if (size > 0) {
 		payload = kmalloc(size, GFP_KERNEL);
 		if (!payload) {
-			pr_err("bp_sendmsg: failed to allocate memory");
+			pr_err("bp_sendmsg: failed to allocate memory\n");
 			ret = -ENOMEM;
 			goto out;
 		}
 
 		if (copy_from_iter(payload, size, &msg->msg_iter) != size) {
-			pr_err("bp_sendmsg: failed to copy data from user");
+			pr_err("bp_sendmsg: failed to copy data from user\n");
 			ret = -EFAULT;
 			goto err_free;
 		}
@@ -268,7 +268,8 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 		ret = send_bundle_doit((uintptr_t)sock->sk->sk_socket, payload,
 		    size, node_id, service_id, 8443);
 		if (ret < 0) {
-			pr_err("bp_sendmsg: send_bundle_doit failed (%d)", ret);
+			pr_err(
+			    "bp_sendmsg: send_bundle_doit failed (%d)\n", ret);
 			goto err_free;
 		}
 
@@ -293,24 +294,28 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 	sk = sock->sk;
 	lock_sock(sk);
 	bp = bp_sk(sk);
-	request_bundle_doit(bp->bp_node_id, bp->bp_service_id, 8443);
+	ret = request_bundle_doit(bp->bp_node_id, bp->bp_service_id, 8443);
+	if (ret < 0) {
+		pr_err("bp_recvmsg: request_bundle_doit failed (%d)\n", ret);
+		goto out;
+	}
 
 	ret = wait_event_interruptible(
 	    bp->wait_queue, !skb_queue_empty(&bp->queue));
 	if (ret < 0) {
-		pr_err("bp_recvmsg: interrupted while waiting");
+		pr_err("bp_recvmsg: interrupted while waiting\n");
 		goto out;
 	}
 
 	if (sock_flag(sk, SOCK_DEAD)) {
-		pr_err("bp_recvmsg: socket closed while waiting");
+		pr_err("bp_recvmsg: socket closed while waiting\n");
 		ret = -ESHUTDOWN;
 		goto out;
 	}
 
 	skb = skb_dequeue(&bp->queue);
 	if (!skb) {
-		pr_info("bp_recvmsg: no messages in the queue for service %d",
+		pr_info("bp_recvmsg: no messages in the queue for service %d\n",
 		    bp->bp_service_id);
 		ret = -ENOMSG;
 		goto out;
@@ -318,7 +323,7 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 
 	if (skb->len > size) {
 		pr_err("bp_recvmsg: buffer too small for message (required=%u, "
-		       "provided=%zu)",
+		       "provided=%zu)\n",
 		    skb->len, size);
 		ret = -EMSGSIZE;
 		goto out;

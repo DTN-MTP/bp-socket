@@ -19,20 +19,20 @@ static int __init bp_init(void)
 	/* generic netlink */
 	ret = genl_register_family(&genl_fam);
 	if (unlikely(ret)) {
-		pr_err("bp_init: failed to register generic netlink family");
+		pr_err("bp_init: failed to register generic netlink family\n");
 		goto out;
 	}
 
 	/* protocol */
 	ret = proto_register(&bp_proto, 0);
 	if (ret) {
-		pr_err("bp_init: failed to register proto");
+		pr_err("bp_init: failed to register proto\n");
 		goto out;
 	}
 
 	ret = sock_register(&bp_family_ops);
 	if (ret) {
-		pr_err("bp_init: failed to register socket family");
+		pr_err("bp_init: failed to register socket family\n");
 		goto err_unreg_proto;
 	}
 
@@ -41,7 +41,7 @@ static int __init bp_init(void)
 err_unreg_proto:
 	proto_unregister(&bp_proto);
 out:
-	pr_err("bp_init: module initialization failed");
+	pr_err("bp_init: module initialization failed\n");
 	return ret;
 }
 
@@ -51,7 +51,8 @@ static void __exit bp_exit(void)
 	proto_unregister(&bp_proto);
 
 	if (unlikely(genl_unregister_family(&genl_fam))) {
-		pr_err("bp_init: failed to unregister generic netlink family");
+		pr_err(
+		    "bp_init: failed to unregister generic netlink family\n");
 	}
 }
 
