@@ -25,6 +25,7 @@ int main(int argc, char *argv[]) {
         .event_on_nl_sock = NULL,
     };
 
-    int ret = daemon_start(&daemon);
-    return ret;
+    if (daemon_run(&daemon) < 0) return EXIT_FAILURE;
+
+    return EXIT_SUCCESS;
 }

@@ -36,8 +36,8 @@ struct genl_family genl_fam = {
 	.n_mcgrps = ARRAY_SIZE(genl_mcgrps),
 };
 
-int send_bundle_doit(u64 sockid, void* payload, int payload_size,
-    u_int32_t node_id, u_int32_t service_id, int port_id)
+int send_bundle_doit(void* payload, int payload_size, u_int32_t node_id,
+    u_int32_t service_id, int port_id)
 {
 	void* msg_head;
 	struct sk_buff* msg;
@@ -60,12 +60,6 @@ int send_bundle_doit(u64 sockid, void* payload, int payload_size,
 		pr_err("send_bundle: failed to create genetlink header\n");
 		ret = -EMSGSIZE;
 		goto err_free;
-	}
-
-	ret = nla_put_u64_64bit(msg, BP_GENL_A_SOCKID, sockid, 0);
-	if (ret) {
-		pr_err("send_bundle: failed to put SOCKID (%d)\n", ret);
-		goto err_cancel;
 	}
 
 	ret = nla_put_u32(msg, BP_GENL_A_NODE_ID, node_id);
@@ -104,7 +98,7 @@ int request_bundle_doit(u_int32_t node_id, u_int32_t service_id, int port_id)
 	size_t msg_size;
 	int ret;
 
-	msg_size = nla_total_size(sizeof(u32));
+	msg_size = 2 * nla_total_size(sizeof(u_int32_t));
 	msg = genlmsg_new(msg_size, GFP_KERNEL);
 	if (!msg) {
 		pr_err("request_bundle: failed to allocate message buffer\n");
@@ -118,6 +112,12 @@ int request_bundle_doit(u_int32_t node_id, u_int32_t service_id, int port_id)
 		pr_err("request_bundle: failed to create genetlink header\n");
 		ret = -EMSGSIZE;
 		goto err_free;
+	}
+
+	ret = nla_put_u32(msg, BP_GENL_A_NODE_ID, node_id);
+	if (ret) {
+		pr_err("request_bundle: failed to put NODE_ID (%d)\n", ret);
+		goto err_cancel;
 	}
 
 	ret = nla_put_u32(msg, BP_GENL_A_SERVICE_ID, service_id);
@@ -143,17 +143,19 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 	struct bp_sock* bp;
 	struct sk_buff* new_skb;
 	bool new_skb_queued = false;
-	u_int32_t service_id;
+	u_int32_t node_id, service_id;
 	void* payload;
 	size_t payload_len;
 	int ret;
 
-	if (!info->attrs[BP_GENL_A_SERVICE_ID]
+	if (!info->attrs[BP_GENL_A_NODE_ID]
+	    || !info->attrs[BP_GENL_A_SERVICE_ID]
 	    || !info->attrs[BP_GENL_A_PAYLOAD]) {
 		pr_err("deliver_bundle: missing required attributes\n");
 		ret = -EINVAL;
 		goto out;
 	}
+	node_id = nla_get_u32(info->attrs[BP_GENL_A_NODE_ID]);
 	service_id = nla_get_u32(info->attrs[BP_GENL_A_SERVICE_ID]);
 	payload = nla_data(info->attrs[BP_GENL_A_PAYLOAD]);
 	payload_len = nla_len(info->attrs[BP_GENL_A_PAYLOAD]);
@@ -172,7 +174,8 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 		bh_lock_sock(sk);
 		bp = bp_sk(sk);
 
-		if (bp->bp_service_id == service_id) {
+		if (bp->bp_node_id == node_id
+		    && bp->bp_service_id == service_id) {
 
 			skb_queue_tail(&bp->queue, new_skb);
 			new_skb_queued = true;
@@ -196,6 +199,52 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 
 err_free:
 	kfree_skb(new_skb);
+out:
+	return ret;
+}
+
+int destroy_bundle_doit(u_int32_t node_id, u_int32_t service_id, int port_id)
+{
+	void* msg_head;
+	struct sk_buff* msg;
+	size_t msg_size;
+	int ret;
+
+	msg_size = 2 * nla_total_size(sizeof(u_int32_t));
+	msg = genlmsg_new(msg_size, GFP_KERNEL);
+	if (!msg) {
+		pr_err("destroy_bundle: failed to allocate message buffer\n");
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	msg_head
+	    = genlmsg_put(msg, 0, 0, &genl_fam, 0, BP_GENL_CMD_DESTROY_BUNDLE);
+	if (!msg_head) {
+		pr_err("destroy_bundle: failed to create genetlink header\n");
+		ret = -EMSGSIZE;
+		goto err_free;
+	}
+
+	ret = nla_put_u32(msg, BP_GENL_A_NODE_ID, node_id);
+	if (ret) {
+		pr_err("destroy_bundle: failed to put NODE_ID (%d)\n", ret);
+		goto err_cancel;
+	}
+
+	ret = nla_put_u32(msg, BP_GENL_A_SERVICE_ID, service_id);
+	if (ret) {
+		pr_err("destroy_bundle: failed to put SERVICE_ID (%d)\n", ret);
+		goto err_cancel;
+	}
+
+	genlmsg_end(msg, msg_head);
+	return genlmsg_unicast(&init_net, msg, port_id);
+
+err_cancel:
+	genlmsg_cancel(msg, msg_head);
+err_free:
+	nlmsg_free(msg);
 out:
 	return ret;
 }

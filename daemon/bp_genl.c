@@ -13,9 +13,13 @@
 #include "log.h"
 
 struct nl_sock *genl_bp_sock_init(Daemon *daemon) {
-    struct nl_sock *sk = nl_socket_alloc();
+    struct nl_sock *sk;
+    int family_id;
+    int err;
+
+    sk = nl_socket_alloc();
     if (!sk) {
-        log_error("Failed to allocate Netlink socket");
+        log_error("Failed to allocate Netlink socket: %s", nl_geterror(-ENOMEM));
         return NULL;
     }
 
@@ -24,16 +28,16 @@ struct nl_sock *genl_bp_sock_init(Daemon *daemon) {
     nl_socket_modify_cb(sk, NL_CB_VALID, NL_CB_CUSTOM, genl_bp_sock_recvmsg_cb, daemon);
     nl_socket_set_peer_port(sk, 0); // Send to kernel
 
-    int err = genl_connect(sk);
+    err = genl_connect(sk);
     if (err < 0) {
-        log_error("genl_connect() failed: %s", nl_geterror(err));
+        log_error("Failed to connect to Generic Netlink: %s", nl_geterror(err));
         nl_socket_free(sk);
         return NULL;
     }
 
-    int family_id = genl_ctrl_resolve(sk, daemon->genl_bp_family_name);
+    family_id = genl_ctrl_resolve(sk, daemon->genl_bp_family_name);
     if (family_id < 0) {
-        log_error("Failed to resolve family '%s': %s", daemon->genl_bp_family_name,
+        log_error("Failed to resolve Generic Netlink family '%s': %s", daemon->genl_bp_family_name,
                   nl_geterror(family_id));
         nl_socket_free(sk);
         return NULL;
@@ -47,9 +51,10 @@ void genl_bp_sock_close(Daemon *daemon) {
     if (!daemon->genl_bp_sock) return;
 
     nl_socket_free(daemon->genl_bp_sock);
-    log_info("Netlink socket closed");
-
+    daemon->genl_bp_sock = NULL;
     daemon->genl_bp_family_id = -1;
+
+    log_info("Generic Netlink socket closed");
 }
 
 int genl_bp_sock_recvmsg_cb(struct nl_msg *msg, void *arg) {
@@ -57,11 +62,12 @@ int genl_bp_sock_recvmsg_cb(struct nl_msg *msg, void *arg) {
     struct nlmsghdr *nlh = nlmsg_hdr(msg);
     struct genlmsghdr *genlhdr = nlmsg_data(nlh);
     struct nlattr *attrs[BP_GENL_A_MAX + 1];
+    int err;
 
-    int err = nla_parse(attrs, BP_GENL_A_MAX, genlmsg_attrdata(genlhdr, 0),
-                        genlmsg_attrlen(genlhdr, 0), NULL);
-    if (err) {
-        log_error("Failed to parse message: %s", strerror(-err));
+    err = nla_parse(attrs, BP_GENL_A_MAX, genlmsg_attrdata(genlhdr, 0), genlmsg_attrlen(genlhdr, 0),
+                    NULL);
+    if (err < 0) {
+        log_error("Failed to parse Netlink attributes: %s", strerror(-err));
         return NL_SKIP;
     }
 
@@ -70,8 +76,12 @@ int genl_bp_sock_recvmsg_cb(struct nl_msg *msg, void *arg) {
         return handle_send_bundle(daemon, attrs);
     case BP_GENL_CMD_REQUEST_BUNDLE:
         return handle_request_bundle(daemon, attrs);
+    // case BP_GENL_CMD_DELIVER_BUNDLE:
+    //     return handle_deliver_bundle_reply(daemon, attrs);
+    case BP_GENL_CMD_DESTROY_BUNDLE:
+        return handle_destroy_bundle(daemon, attrs);
     default:
-        log_error("Unknown GENL command: %d", genlhdr->cmd);
+        log_error("Unknown Generic Netlink command: %d", genlhdr->cmd);
         return NL_SKIP;
     }
 }

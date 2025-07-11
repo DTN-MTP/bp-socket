@@ -24,7 +24,8 @@ void on_netlink(evutil_socket_t fd, short event, void *arg) {
         daemon->genl_bp_sock); // call the callback registered with genl_bp_sock_recvmsg_cb()
 }
 
-int daemon_start(Daemon *self) {
+int daemon_run(Daemon *self) {
+    int fd;
     int ret;
 
     self->base = event_base_new();
@@ -32,41 +33,51 @@ int daemon_start(Daemon *self) {
              (char *)event_base_get_method(self->base));
 
     self->event_on_sigint = evsignal_new(self->base, SIGINT, on_sigint, self->base);
-    event_add(self->event_on_sigint, NULL);
+    ret = event_add(self->event_on_sigint, NULL);
+    if (ret < 0) {
+        log_error("Couldn't add SIGINT event");
+        daemon_free(self);
+        return ret;
+    }
 
     self->event_on_sigpipe = evsignal_new(self->base, SIGPIPE, on_sigpipe, self->base);
-    event_add(self->event_on_sigpipe, NULL);
+    ret = event_add(self->event_on_sigpipe, NULL);
+    if (ret < 0) {
+        log_error("Couldn't add SIGPIPE event");
+        daemon_free(self);
+        return ret;
+    }
 
     self->genl_bp_sock = genl_bp_sock_init(self);
     if (!self->genl_bp_sock) {
         log_error("Failed to initialize Generic Netlink socket");
         daemon_free(self);
-        return 1;
+        return -ENOMEM;
     }
     log_info("Generic Netlink: GENL_BP open socket");
 
-    int genl_bp_sock_fd = nl_socket_get_fd(self->genl_bp_sock);
-    self->event_on_nl_sock =
-        event_new(self->base, genl_bp_sock_fd, EV_READ | EV_PERSIST, on_netlink, self);
-    if (event_add(self->event_on_nl_sock, NULL) == -1) {
+    fd = nl_socket_get_fd(self->genl_bp_sock);
+    self->event_on_nl_sock = event_new(self->base, fd, EV_READ | EV_PERSIST, on_netlink, self);
+    ret = event_add(self->event_on_nl_sock, NULL);
+    if (ret < 0) {
         log_error("Couldn't add Netlink event");
         daemon_free(self);
-        return 1;
+        return ret;
     }
 
-    ret = evutil_make_socket_nonblocking(genl_bp_sock_fd);
-    if (ret == -1) {
+    ret = evutil_make_socket_nonblocking(fd);
+    if (ret < 0) {
         log_error("Failed in evutil_make_socket_nonblocking: %s",
                   evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
         daemon_free(self);
-        return 1;
+        return ret;
     }
 
     log_info("Attempting to attach to ION...");
     if (bp_attach() < 0) {
         log_error("Can't attach to BP");
         daemon_free(self);
-        return 1;
+        return -EAGAIN;
     }
     self->sdr = bp_get_sdr();
     log_info("Successfully attached to ION");

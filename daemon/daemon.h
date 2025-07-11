@@ -22,7 +22,7 @@ void on_sigint(evutil_socket_t fd, short what, void *arg);
 void on_sigpipe(evutil_socket_t fd, short what, void *arg);
 void on_netlink(evutil_socket_t fd, short what, void *arg);
 
-int daemon_start(Daemon *self);
+int daemon_run(Daemon *self);
 void daemon_free(Daemon *self);
 
 #endif
