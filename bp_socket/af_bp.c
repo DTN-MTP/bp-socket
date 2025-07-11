@@ -265,8 +265,8 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 			goto err_free;
 		}
 
-		ret = send_bundle_doit((uintptr_t)sock->sk->sk_socket, payload,
-		    size, node_id, service_id, 8443);
+		ret = send_bundle_doit(
+		    payload, size, node_id, service_id, 8443);
 		if (ret < 0) {
 			pr_err(
 			    "bp_sendmsg: send_bundle_doit failed (%d)\n", ret);
@@ -333,6 +333,13 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 		pr_err("bp_recvmsg: failed to copy data to user space\n");
 		ret = -EFAULT;
 		goto out;
+	}
+
+	ret = destroy_bundle_doit(bp->bp_node_id, bp->bp_service_id, 8443);
+	if (ret < 0) {
+		pr_err(
+		    "destroy_bundle_doit failed (%d), will retry later", ret);
+		// enqueue_retry(bp->bp_node_id, bp->bp_service_id);
 	}
 
 	ret = skb->len;
