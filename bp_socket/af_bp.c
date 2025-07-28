@@ -170,28 +170,20 @@ int bp_release(struct socket* sock)
 	struct sock* sk = sock->sk;
 	struct bp_sock* bp;
 
-	if (!sk) {
-		return 0;
+	if (sk) {
+		lock_sock(sk);
+		sock_orphan(sk);
+		bp = bp_sk(sk);
+
+		write_lock_bh(&bp_list_lock);
+		sk_del_node_init(sk);
+		write_unlock_bh(&bp_list_lock);
+		skb_queue_purge(&bp->queue);
+
+		sock->sk = NULL;
+		release_sock(sk);
+		sock_put(sk);
 	}
-
-	if (sock_owned_by_user(sk)) {
-		pr_warn("bp_release: socket is in use by another thread, "
-			"skipping cleanup to avoid deadlock\n");
-		return 0;
-	}
-
-	lock_sock(sk);
-	sock_orphan(sk);
-	bp = bp_sk(sk);
-
-	write_lock_bh(&bp_list_lock);
-	sk_del_node_init(sk);
-	write_unlock_bh(&bp_list_lock);
-	skb_queue_purge(&bp->queue);
-
-	sock->sk = NULL;
-	release_sock(sk);
-	sock_put(sk);
 
 	return 0;
 }
@@ -338,20 +330,14 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 		goto out;
 	}
 
-	src_addr->bp_family = AF_BP;
-	src_addr->bp_scheme = BP_SCHEME_IPN;
-	src_addr->bp_addr.ipn.node_id = BP_SKB_CB(skb)->src_node_id;
-	src_addr->bp_addr.ipn.service_id = BP_SKB_CB(skb)->src_service_id;
-
-	if (msg->msg_name && msg->msg_namelen >= sizeof(struct sockaddr_bp)) {
-		memcpy(msg->msg_name, &src_addr, sizeof(struct sockaddr_bp));
-		msg->msg_namelen = sizeof(struct sockaddr_bp); // important
-	} else if (msg->msg_name) {
-		pr_warn(
-		    "bp_recvmsg: user msg_name buffer too small (%u bytes)\n",
-		    msg->msg_namelen);
-		ret = -EINVAL;
-		goto out;
+	if (msg->msg_name) {
+		src_addr = (struct sockaddr_bp*)msg->msg_name;
+		src_addr->bp_family = AF_BP;
+		src_addr->bp_scheme = BP_SCHEME_IPN;
+		src_addr->bp_addr.ipn.node_id = BP_SKB_CB(skb)->src_node_id;
+		src_addr->bp_addr.ipn.service_id
+		    = BP_SKB_CB(skb)->src_service_id;
+		msg->msg_namelen = sizeof(struct sockaddr_bp);
 	}
 
 	if (copy_to_iter(skb->data, skb->len, &msg->msg_iter) != skb->len) {

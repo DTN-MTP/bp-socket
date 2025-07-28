@@ -140,8 +140,8 @@ out:
     return ret;
 }
 
-void *bp_recv_once(Sdr sdr, u_int32_t dest_node_id, u_int32_t dest_service_id,
-                   size_t *payload_size) {
+void *bp_recv_once(Sdr sdr, u_int32_t dest_node_id, u_int32_t dest_service_id, size_t *payload_size,
+                   u_int32_t *src_node_id, u_int32_t *src_service_id) {
     BpSAP sap;
     BpDelivery dlv;
     ZcoReader reader;
@@ -196,8 +196,12 @@ void *bp_recv_once(Sdr sdr, u_int32_t dest_node_id, u_int32_t dest_service_id,
         goto release_dlv;
     }
 
-    log_info("bp_recv_once: received bundle from %s", dlv.bundleSourceEid);
-    if (add_adu(sdr, dlv.adu, dest_node_id, dest_service_id, 10, 10) < 0) {
+    if (sscanf(dlv.bundleSourceEid, "ipn:%u.%u", src_node_id, src_service_id) != 2) {
+        log_error("bp_recv_once: failed to parse bundleSourceEid: %s", dlv.bundleSourceEid);
+        goto release_dlv;
+    }
+
+    if (add_adu(sdr, dlv.adu, dest_node_id, dest_service_id, *src_node_id, *src_service_id) < 0) {
         log_error("bp_recv_once: failed to add bundle reference.");
         goto release_dlv;
     }

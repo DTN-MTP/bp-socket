@@ -85,9 +85,12 @@ int main(int argc, char *argv[]) {
   }
 
   printf("Received message (%zd bytes): %.*s\n", n, (int)n, buffer);
-  printf("Bundle sent by ipn:%u.%u\n", src_addr.bp_addr.ipn.node_id,
-       src_addr.bp_addr.ipn.service_id);
-
+  if (msg.msg_namelen >= sizeof(struct sockaddr_bp)) {
+    printf("Bundle sent by ipn:%u.%u\n", src_addr.bp_addr.ipn.node_id,
+           src_addr.bp_addr.ipn.service_id);
+  } else {
+    printf("Source address not available\n");
+  }
 
 out:
   close(sfd);

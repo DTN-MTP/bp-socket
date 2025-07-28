@@ -97,6 +97,7 @@ int handle_request_bundle(Daemon *daemon, struct nlattr **attrs) {
 void *handle_recv_thread(struct thread_args *args) {
     void *payload = NULL;
     size_t payload_size;
+    u_int32_t src_node_id, src_service_id;
     int err;
     bool bundle_present;
     Object adu;
@@ -104,7 +105,8 @@ void *handle_recv_thread(struct thread_args *args) {
     adu = find_adu(args->sdr, args->node_id, args->service_id);
     bundle_present = adu != 0;
 
-    payload = bp_recv_once(args->sdr, args->node_id, args->service_id, &payload_size);
+    payload = bp_recv_once(args->sdr, args->node_id, args->service_id, &payload_size, &src_node_id,
+                           &src_service_id);
     if (!payload) {
         log_error("[ipn:%u.%u] handle_recv_thread: failed to receive bundle", args->node_id,
                   args->service_id);
@@ -121,7 +123,7 @@ void *handle_recv_thread(struct thread_args *args) {
     }
 
     err = handle_deliver_bundle(args->netlink_family, args->netlink_sock, payload, payload_size,
-                                args->node_id, args->service_id, args->node_id, args->service_id);
+                                src_node_id, src_service_id, args->node_id, args->service_id);
     if (err < 0) {
         log_error("[ipn:%u.%u] handle_deliver_bundle: failed with error %d", args->node_id,
                   args->service_id, err);
