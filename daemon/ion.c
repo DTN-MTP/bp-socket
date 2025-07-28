@@ -101,7 +101,7 @@ int destroy_adu(Sdr sdr, u_int32_t dest_node_id, u_int32_t dest_service_id) {
     return -ENOENT;
 }
 
-int bp_send_to_eid(Sdr sdr, void *payload, int payload_size, char *dest_eid, int eid_size) {
+int bp_send_to_eid(Sdr sdr, void *payload, size_t payload_size, char *dest_eid) {
     Object sdr_buffer = 0;
     Object adu;
     int ret = 0;
@@ -123,18 +123,19 @@ int bp_send_to_eid(Sdr sdr, void *payload, int payload_size, char *dest_eid, int
     adu = zco_create(sdr, ZcoSdrSource, sdr_buffer, 0, payload_size, ZcoOutbound);
     if (adu <= 0) {
         log_error("zco_create failed.");
+        sdr_free(sdr, sdr_buffer);
         ret = -ENOMEM;
         goto out;
     }
 
     if (bp_send(NULL, dest_eid, NULL, 86400, BP_STD_PRIORITY, 0, 0, 0, NULL, adu, NULL) <= 0) {
         log_error("bp_send failed.");
+        sdr_free(sdr, sdr_buffer);
         ret = -EIO;
         goto out;
     }
 
 out:
-    if (sdr_buffer != 0) sdr_free(sdr, sdr_buffer);
     sdr_end_xn(sdr);
     return ret;
 }

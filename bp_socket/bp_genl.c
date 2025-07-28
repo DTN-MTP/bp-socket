@@ -37,7 +37,7 @@ struct genl_family genl_fam = {
 	.n_mcgrps = ARRAY_SIZE(genl_mcgrps),
 };
 
-int send_bundle_doit(void* payload, int payload_size, u_int32_t dest_node_id,
+int send_bundle_doit(void* payload, size_t payload_size, u_int32_t dest_node_id,
     u_int32_t dest_service_id, int port_id)
 {
 	void* msg_head;
@@ -45,8 +45,7 @@ int send_bundle_doit(void* payload, int payload_size, u_int32_t dest_node_id,
 	size_t msg_size;
 	int ret;
 
-	msg_size = nla_total_size(sizeof(u64))
-	    + nla_total_size(sizeof(u_int32_t))
+	msg_size = nla_total_size(sizeof(u_int32_t))
 	    + nla_total_size(sizeof(u_int32_t)) + nla_total_size(payload_size);
 	msg = genlmsg_new(msg_size, GFP_KERNEL);
 	if (!msg) {
@@ -159,6 +158,16 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 	size_t payload_len;
 	int ret;
 
+	if (!info->attrs[BP_GENL_A_DEST_NODE_ID]
+	    || !info->attrs[BP_GENL_A_DEST_SERVICE_ID]
+	    || !info->attrs[BP_GENL_A_SRC_NODE_ID]
+	    || !info->attrs[BP_GENL_A_SRC_SERVICE_ID]
+	    || !info->attrs[BP_GENL_A_PAYLOAD]) {
+		pr_err("deliver_bundle: missing required attributes\n");
+		ret = -EINVAL;
+		goto out;
+	}
+
 	dest_node_id = nla_get_u32(info->attrs[BP_GENL_A_DEST_NODE_ID]);
 	dest_service_id = nla_get_u32(info->attrs[BP_GENL_A_DEST_SERVICE_ID]);
 	src_node_id = nla_get_u32(info->attrs[BP_GENL_A_SRC_NODE_ID]);
@@ -197,7 +206,7 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 	read_unlock_bh(&bp_list_lock);
 
 	if (!new_skb_queued) {
-		pr_err("deliver_bundle: no socket found (ion:%d.%d)\n",
+		pr_err("deliver_bundle: no socket found (ipn:%d.%d)\n",
 		    dest_node_id, dest_service_id);
 		ret = -ENODEV;
 		goto err_free;

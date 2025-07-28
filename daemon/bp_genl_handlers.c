@@ -16,11 +16,11 @@
 
 int handle_send_bundle(Daemon *daemon, struct nlattr **attrs) {
     void *payload;
-    int payload_size;
+    size_t payload_size;
     u_int32_t node_id, service_id;
-    char eid[64];
-    int eid_size;
+    char dest_eid[64];
     int err = 0;
+    int written;
 
     if (!attrs[BP_GENL_A_PAYLOAD] || !attrs[BP_GENL_A_DEST_NODE_ID] ||
         !attrs[BP_GENL_A_DEST_SERVICE_ID]) {
@@ -35,27 +35,24 @@ int handle_send_bundle(Daemon *daemon, struct nlattr **attrs) {
     node_id = nla_get_u32(attrs[BP_GENL_A_DEST_NODE_ID]);
     service_id = nla_get_u32(attrs[BP_GENL_A_DEST_SERVICE_ID]);
 
-    eid_size = snprintf(eid, sizeof(eid), "ipn:%u.%u", node_id, service_id) + 1;
-    if (eid_size < 0 || eid_size >= (int)sizeof(eid)) {
+    written = snprintf(dest_eid, sizeof(dest_eid), "ipn:%u.%u", node_id, service_id);
+    if (written < 0 || written >= (int)sizeof(dest_eid)) {
         log_error("[ipn:%u.%u] handle_send_bundle: failed to construct EID string", node_id,
                   service_id);
         return -EINVAL;
     }
 
-    err = bp_send_to_eid(daemon->sdr, payload, payload_size, eid, eid_size);
+    err = bp_send_to_eid(daemon->sdr, payload, payload_size, dest_eid);
     if (err < 0) {
         log_error("[ipn:%u.%u] handle_send_bundle: bp_send_to_eid failed with error %d", node_id,
                   service_id, err);
-        goto out;
+        return err;
     }
 
     log_info("[ipn:%u.%u] SEND_BUNDLE: bundle sent to EID %s, size %d (bytes)", node_id, service_id,
-             eid, payload_size);
+             dest_eid, payload_size);
 
     return 0;
-
-out:
-    return err;
 }
 
 int handle_request_bundle(Daemon *daemon, struct nlattr **attrs) {

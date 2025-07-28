@@ -170,20 +170,28 @@ int bp_release(struct socket* sock)
 	struct sock* sk = sock->sk;
 	struct bp_sock* bp;
 
-	if (sk) {
-		lock_sock(sk);
-		sock_orphan(sk);
-		bp = bp_sk(sk);
-
-		write_lock_bh(&bp_list_lock);
-		sk_del_node_init(sk);
-		write_unlock_bh(&bp_list_lock);
-		skb_queue_purge(&bp->queue);
-
-		sock->sk = NULL;
-		release_sock(sk);
-		sock_put(sk);
+	if (!sk) {
+		return 0;
 	}
+
+	if (sock_owned_by_user(sk)) {
+		pr_warn("bp_release: socket is in use by another thread, "
+			"skipping cleanup to avoid deadlock\n");
+		return 0;
+	}
+
+	lock_sock(sk);
+	sock_orphan(sk);
+	bp = bp_sk(sk);
+
+	write_lock_bh(&bp_list_lock);
+	sk_del_node_init(sk);
+	write_unlock_bh(&bp_list_lock);
+	skb_queue_purge(&bp->queue);
+
+	sock->sk = NULL;
+	release_sock(sk);
+	sock_put(sk);
 
 	return 0;
 }
