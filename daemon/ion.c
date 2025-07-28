@@ -62,6 +62,17 @@ Object find_adu(Sdr sdr, u_int32_t dest_node_id, u_int32_t dest_service_id) {
     return 0;
 }
 
+struct adu_reference *find_adu_ref(Sdr sdr, u_int32_t dest_node_id, u_int32_t dest_service_id) {
+    struct adu_reference *ref;
+
+    for (ref = adu_refs; ref != NULL; ref = ref->next) {
+        if (ref->dest_node_id == dest_node_id && ref->dest_service_id == dest_service_id) {
+            return ref;
+        }
+    }
+    return NULL;
+}
+
 int destroy_adu(Sdr sdr, u_int32_t dest_node_id, u_int32_t dest_service_id) {
     struct adu_reference *prev = NULL;
     struct adu_reference *current = adu_refs;
@@ -145,7 +156,7 @@ void *bp_recv_once(Sdr sdr, u_int32_t dest_node_id, u_int32_t dest_service_id, s
     BpSAP sap;
     BpDelivery dlv;
     ZcoReader reader;
-    Object adu;
+    struct adu_reference *adu_ref;
     u_int32_t own_node_id;
     void *payload = NULL;
     int eid_size;
@@ -157,20 +168,22 @@ void *bp_recv_once(Sdr sdr, u_int32_t dest_node_id, u_int32_t dest_service_id, s
         return NULL;
     }
 
-    adu = find_adu(sdr, dest_node_id, dest_service_id);
-    if (adu != 0) {
-        *payload_size = zco_source_data_length(sdr, adu);
+    adu_ref = find_adu_ref(sdr, dest_node_id, dest_service_id);
+    if (adu_ref != NULL) {
+        *payload_size = zco_source_data_length(sdr, adu_ref->adu);
         payload = malloc(*payload_size);
         if (!payload) {
             log_error("bp_recv_once: Failed to allocate memory for payload.");
             return NULL;
         }
-        zco_start_receiving(adu, &reader);
+        zco_start_receiving(adu_ref->adu, &reader);
         if (zco_receive_source(sdr, &reader, *payload_size, payload) < 0) {
             log_error("bp_recv_once: zco_receive_source failed.");
             free(payload);
             return NULL;
         }
+        *src_node_id = adu_ref->src_node_id;
+        *src_service_id = adu_ref->src_service_id;
         return payload;
     }
 
