@@ -289,6 +289,7 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 	struct sock* sk;
 	struct bp_sock* bp;
 	struct sk_buff* skb;
+	struct sockaddr_bp* src_addr;
 	int ret;
 
 	sk = sock->sk;
@@ -326,6 +327,22 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 		       "provided=%zu)\n",
 		    skb->len, size);
 		ret = -EMSGSIZE;
+		goto out;
+	}
+
+	src_addr->bp_family = AF_BP;
+	src_addr->bp_scheme = BP_SCHEME_IPN;
+	src_addr->bp_addr.ipn.node_id = BP_SKB_CB(skb)->src_node_id;
+	src_addr->bp_addr.ipn.service_id = BP_SKB_CB(skb)->src_service_id;
+
+	if (msg->msg_name && msg->msg_namelen >= sizeof(struct sockaddr_bp)) {
+		memcpy(msg->msg_name, &src_addr, sizeof(struct sockaddr_bp));
+		msg->msg_namelen = sizeof(struct sockaddr_bp); // important
+	} else if (msg->msg_name) {
+		pr_warn(
+		    "bp_recvmsg: user msg_name buffer too small (%u bytes)\n",
+		    msg->msg_namelen);
+		ret = -EINVAL;
 		goto out;
 	}
 

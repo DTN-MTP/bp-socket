@@ -4,7 +4,13 @@
 #include <linux/net.h>
 #include <net/sock.h>
 
+struct bp_skb_cb {
+	u_int32_t src_node_id;
+	u_int32_t src_service_id;
+};
+
 #define bp_sk(ptr) container_of(ptr, struct bp_sock, sk)
+#define BP_SKB_CB(skb) ((struct bp_skb_cb*)((skb)->cb))
 
 extern struct hlist_head bp_list;
 extern rwlock_t bp_list_lock;

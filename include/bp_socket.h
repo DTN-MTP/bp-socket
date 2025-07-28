@@ -17,9 +17,10 @@
 /* Generic Netlink attributes */
 enum bp_genl_attrs {
   BP_GENL_A_UNSPEC,
-  BP_GENL_A_SOCKID,
-  BP_GENL_A_NODE_ID,
-  BP_GENL_A_SERVICE_ID,
+  BP_GENL_A_SRC_NODE_ID,
+  BP_GENL_A_SRC_SERVICE_ID,
+  BP_GENL_A_DEST_NODE_ID,
+  BP_GENL_A_DEST_SERVICE_ID,
   BP_GENL_A_PAYLOAD,
   __BP_GENL_A_MAX,
 };

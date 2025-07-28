@@ -20,8 +20,10 @@ int handle_send_bundle(Daemon *daemon, struct nlattr **attrs) {
     u_int32_t node_id, service_id;
     char eid[64];
     int eid_size;
+    int err = 0;
 
-    if (!attrs[BP_GENL_A_PAYLOAD] || !attrs[BP_GENL_A_NODE_ID] || !attrs[BP_GENL_A_SERVICE_ID]) {
+    if (!attrs[BP_GENL_A_PAYLOAD] || !attrs[BP_GENL_A_DEST_NODE_ID] ||
+        !attrs[BP_GENL_A_DEST_SERVICE_ID]) {
         log_error(
             "handle_send_bundle: missing attribute(s) in SEND_BUNDLE command (payload, node ID, "
             "service ID)");
@@ -30,8 +32,8 @@ int handle_send_bundle(Daemon *daemon, struct nlattr **attrs) {
 
     payload = nla_data(attrs[BP_GENL_A_PAYLOAD]);
     payload_size = nla_len(attrs[BP_GENL_A_PAYLOAD]);
-    node_id = nla_get_u32(attrs[BP_GENL_A_NODE_ID]);
-    service_id = nla_get_u32(attrs[BP_GENL_A_SERVICE_ID]);
+    node_id = nla_get_u32(attrs[BP_GENL_A_DEST_NODE_ID]);
+    service_id = nla_get_u32(attrs[BP_GENL_A_DEST_SERVICE_ID]);
 
     eid_size = snprintf(eid, sizeof(eid), "ipn:%u.%u", node_id, service_id) + 1;
     if (eid_size < 0 || eid_size >= (int)sizeof(eid)) {
@@ -40,10 +42,20 @@ int handle_send_bundle(Daemon *daemon, struct nlattr **attrs) {
         return -EINVAL;
     }
 
-    log_info("[ipn:%u.%u] SEND_BUNDLE: sending bundle to EID %s, size %d (bytes)", eid,
-             payload_size, node_id, service_id);
+    err = bp_send_to_eid(daemon->sdr, payload, payload_size, eid, eid_size);
+    if (err < 0) {
+        log_error("[ipn:%u.%u] handle_send_bundle: bp_send_to_eid failed with error %d", node_id,
+                  service_id, err);
+        goto out;
+    }
 
-    return bp_send_to_eid(daemon->sdr, payload, payload_size, eid, eid_size);
+    log_info("[ipn:%u.%u] SEND_BUNDLE: bundle sent to EID %s, size %d (bytes)", node_id, service_id,
+             eid, payload_size);
+
+    return 0;
+
+out:
+    return err;
 }
 
 int handle_request_bundle(Daemon *daemon, struct nlattr **attrs) {
@@ -51,15 +63,15 @@ int handle_request_bundle(Daemon *daemon, struct nlattr **attrs) {
     struct thread_args *args;
     u_int32_t node_id, service_id;
 
-    if (!attrs[BP_GENL_A_SERVICE_ID] || !attrs[BP_GENL_A_NODE_ID]) {
+    if (!attrs[BP_GENL_A_DEST_SERVICE_ID] || !attrs[BP_GENL_A_DEST_NODE_ID]) {
         log_error("handle_request_bundle: missing attribute(s) in REQUEST_BUNDLE "
                   "command (service "
                   "ID, node ID)");
         return -EINVAL;
     }
 
-    node_id = nla_get_u32(attrs[BP_GENL_A_NODE_ID]);
-    service_id = nla_get_u32(attrs[BP_GENL_A_SERVICE_ID]);
+    node_id = nla_get_u32(attrs[BP_GENL_A_DEST_NODE_ID]);
+    service_id = nla_get_u32(attrs[BP_GENL_A_DEST_SERVICE_ID]);
 
     args = malloc(sizeof(struct thread_args));
     if (!args) {
@@ -111,10 +123,11 @@ void *handle_recv_thread(struct thread_args *args) {
                  args->node_id, args->service_id, payload_size);
     }
 
-    err = handle_deliver_bundle(payload, payload_size, args);
+    err = handle_deliver_bundle(args->netlink_family, args->netlink_sock, payload, payload_size,
+                                args->node_id, args->service_id, args->node_id, args->service_id);
     if (err < 0) {
-        log_error("[ipn:%u.%u] handle_deliver_bundle: failed with error %d", err, args->node_id,
-                  args->service_id);
+        log_error("[ipn:%u.%u] handle_deliver_bundle: failed with error %d", args->node_id,
+                  args->service_id, err);
     }
 
 out:
@@ -123,60 +136,76 @@ out:
     return NULL;
 }
 
-int handle_deliver_bundle(void *payload, int payload_size, struct thread_args *args) {
+int handle_deliver_bundle(int netlink_family, struct nl_sock *netlink_sock, void *payload,
+                          int payload_size, u_int32_t src_node_id, u_int32_t src_service_id,
+                          u_int32_t dest_node_id, u_int32_t dest_service_id) {
     struct nl_msg *msg = NULL;
     void *hdr;
     int ret;
 
     msg = nlmsg_alloc();
     if (!msg) {
-        log_error("[ipn:%u.%u] handle_deliver_bundle: failed to allocate Netlink msg",
-                  args->node_id, args->service_id);
+        log_error("[ipn:%u.%u] handle_deliver_bundle: failed to allocate Netlink msg", dest_node_id,
+                  dest_service_id);
         ret = -ENOMEM;
         goto out;
     }
 
-    hdr = genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, args->netlink_family, 0, 0,
+    hdr = genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, netlink_family, 0, 0,
                       BP_GENL_CMD_DELIVER_BUNDLE, BP_GENL_VERSION);
     if (!hdr) {
         log_error("[ipn:%u.%u] handle_deliver_bundle: failed to create Netlink header",
-                  args->node_id, args->service_id);
+                  dest_node_id, dest_service_id);
         ret = -EMSGSIZE;
         goto err_free_msg;
     }
 
-    if (nla_put_u32(msg, BP_GENL_A_SERVICE_ID, args->service_id) < 0) {
-        log_error("[ipn:%u.%u] handle_deliver_bundle: failed to add SERVICE_ID attribute",
-                  args->node_id, args->service_id);
-        ret = -EMSGSIZE;
-        goto err_free_msg;
-    }
-
-    if (nla_put_u32(msg, BP_GENL_A_NODE_ID, args->node_id) < 0) {
+    if (nla_put_u32(msg, BP_GENL_A_DEST_NODE_ID, dest_node_id) < 0) {
         log_error("[ipn:%u.%u] handle_deliver_bundle: failed to add NODE_ID attribute",
-                  args->node_id, args->service_id);
+                  dest_node_id, dest_service_id);
+        ret = -EMSGSIZE;
+        goto err_free_msg;
+    }
+
+    if (nla_put_u32(msg, BP_GENL_A_DEST_SERVICE_ID, dest_service_id) < 0) {
+        log_error("[ipn:%u.%u] handle_deliver_bundle: failed to add SERVICE_ID attribute",
+                  dest_node_id, dest_service_id);
+        ret = -EMSGSIZE;
+        goto err_free_msg;
+    }
+
+    if (nla_put_u32(msg, BP_GENL_A_SRC_NODE_ID, src_node_id) < 0) {
+        log_error("[ipn:%u.%u] handle_deliver_bundle: failed to add SRC_NODE_ID attribute",
+                  src_node_id, src_service_id);
+        ret = -EMSGSIZE;
+        goto err_free_msg;
+    }
+
+    if (nla_put_u32(msg, BP_GENL_A_SRC_SERVICE_ID, src_service_id) < 0) {
+        log_error("[ipn:%u.%u] handle_deliver_bundle: failed to add SRC_SERVICE_ID attribute",
+                  src_node_id, src_service_id);
         ret = -EMSGSIZE;
         goto err_free_msg;
     }
 
     if (nla_put(msg, BP_GENL_A_PAYLOAD, payload_size, payload) < 0) {
-        log_error("[ipn:%u.%u] [ipn:%u.%u] handle_deliver_bundle: failed to add PAYLOAD attribute",
-                  args->node_id, args->service_id);
+        log_error("[ipn:%u.%u] handle_deliver_bundle: failed to add PAYLOAD attribute",
+                  dest_node_id, dest_service_id);
         ret = -EMSGSIZE;
         goto err_free_msg;
     }
 
-    ret = nl_send_sync(args->netlink_sock, msg);
+    ret = nl_send_sync(netlink_sock, msg);
     if (ret < 0) {
         log_warn("[ipn:%u.%u] DELIVER_BUNDLE: bundle not delivered to kernel, keeping reference in "
                  "memory (no active BP socket "
                  "client)",
-                 args->node_id, args->service_id);
+                 dest_node_id, dest_service_id);
         ret = 0; // Do not return an error, just log it
         goto out;
     }
 
-    log_info("[ipn:%u.%u] DELIVER_BUNDLE: bundle sent to kernel", args->node_id, args->service_id);
+    log_info("[ipn:%u.%u] DELIVER_BUNDLE: bundle sent to kernel", dest_node_id, dest_service_id);
 
     return 0;
 
@@ -190,7 +219,7 @@ int handle_destroy_bundle(Daemon *daemon, struct nlattr **attrs) {
     u_int32_t node_id, service_id;
     int ret = 0;
 
-    if (!attrs[BP_GENL_A_NODE_ID] || !attrs[BP_GENL_A_SERVICE_ID]) {
+    if (!attrs[BP_GENL_A_DEST_NODE_ID] || !attrs[BP_GENL_A_DEST_SERVICE_ID]) {
         log_error("handle_destroy_bundle: missing attribute(s) in DESTROY_BUNDLE "
                   "command (node ID, "
                   "service ID)");
@@ -198,8 +227,8 @@ int handle_destroy_bundle(Daemon *daemon, struct nlattr **attrs) {
         goto out;
     }
 
-    node_id = nla_get_u32(attrs[BP_GENL_A_NODE_ID]);
-    service_id = nla_get_u32(attrs[BP_GENL_A_SERVICE_ID]);
+    node_id = nla_get_u32(attrs[BP_GENL_A_DEST_NODE_ID]);
+    service_id = nla_get_u32(attrs[BP_GENL_A_DEST_SERVICE_ID]);
 
     ret = destroy_adu(daemon->sdr, node_id, service_id);
     if (ret < 0) {

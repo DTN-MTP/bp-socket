@@ -25,6 +25,7 @@ int main(int argc, char *argv[]) {
   char buffer[BUFFER_SIZE];
   uint32_t node_id;
   uint32_t service_id;
+  struct sockaddr_bp src_addr;
   int ret = 0;
 
   if (argc < 3) {
@@ -71,16 +72,22 @@ int main(int argc, char *argv[]) {
   memset(&msg, 0, sizeof(msg));
   msg.msg_iov = &iov;
   msg.msg_iovlen = 1;
+  memset(&src_addr, 0, sizeof(src_addr));
+  msg.msg_name = &src_addr;
+  msg.msg_namelen = sizeof(src_addr);
 
   printf("Listening for incoming messages...\n");
   ssize_t n = recvmsg(sfd, &msg, 0);
   if (n < 0) {
-      perror("recvmsg failed");
-      ret = EXIT_FAILURE;
-      goto out;
+    perror("recvmsg failed");
+    ret = EXIT_FAILURE;
+    goto out;
   }
-  
+
   printf("Received message (%zd bytes): %.*s\n", n, (int)n, buffer);
+  printf("Bundle sent by ipn:%u.%u\n", src_addr.bp_addr.ipn.node_id,
+       src_addr.bp_addr.ipn.service_id);
+
 
 out:
   close(sfd);

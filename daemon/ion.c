@@ -23,7 +23,8 @@ const char *bp_result_text(BpIndResult result) {
     }
 }
 
-int add_adu(Sdr sdr, Object adu, u_int32_t node_id, u_int32_t service_id) {
+int add_adu(Sdr sdr, Object adu, u_int32_t dest_node_id, u_int32_t dest_service_id,
+            u_int32_t src_node_id, u_int32_t src_service_id) {
     struct adu_reference *ref;
 
     if (pthread_mutex_lock(&adu_refs_mutex) != 0) {
@@ -39,8 +40,10 @@ int add_adu(Sdr sdr, Object adu, u_int32_t node_id, u_int32_t service_id) {
     }
 
     ref->adu = adu;
-    ref->node_id = node_id;
-    ref->service_id = service_id;
+    ref->dest_node_id = dest_node_id;
+    ref->dest_service_id = dest_service_id;
+    ref->src_node_id = src_node_id;
+    ref->src_service_id = src_service_id;
     ref->next = adu_refs;
     adu_refs = ref;
 
@@ -48,18 +51,18 @@ int add_adu(Sdr sdr, Object adu, u_int32_t node_id, u_int32_t service_id) {
     return 0;
 }
 
-Object find_adu(Sdr sdr, u_int32_t node_id, u_int32_t service_id) {
+Object find_adu(Sdr sdr, u_int32_t dest_node_id, u_int32_t dest_service_id) {
     struct adu_reference *ref;
 
     for (ref = adu_refs; ref != NULL; ref = ref->next) {
-        if (ref->node_id == node_id && ref->service_id == service_id) {
+        if (ref->dest_node_id == dest_node_id && ref->dest_service_id == dest_service_id) {
             return ref->adu;
         }
     }
     return 0;
 }
 
-int destroy_adu(Sdr sdr, u_int32_t node_id, u_int32_t service_id) {
+int destroy_adu(Sdr sdr, u_int32_t dest_node_id, u_int32_t dest_service_id) {
     struct adu_reference *prev = NULL;
     struct adu_reference *current = adu_refs;
 
@@ -69,7 +72,7 @@ int destroy_adu(Sdr sdr, u_int32_t node_id, u_int32_t service_id) {
     }
 
     while (current) {
-        if (current->node_id == node_id && current->service_id == service_id) {
+        if (current->dest_node_id == dest_node_id && current->dest_service_id == dest_service_id) {
             if (prev) {
                 prev->next = current->next;
             } else {
@@ -94,7 +97,7 @@ int destroy_adu(Sdr sdr, u_int32_t node_id, u_int32_t service_id) {
     }
 
     pthread_mutex_unlock(&adu_refs_mutex);
-    log_warn("destroy_adu: no bundle found (ipn:%u.%u)", node_id, service_id);
+    log_warn("destroy_adu: no bundle found (ipn:%u.%u)", dest_node_id, dest_service_id);
     return -ENOENT;
 }
 
@@ -136,7 +139,8 @@ out:
     return ret;
 }
 
-void *bp_recv_once(Sdr sdr, u_int32_t node_id, u_int32_t service_id, size_t *payload_size) {
+void *bp_recv_once(Sdr sdr, u_int32_t dest_node_id, u_int32_t dest_service_id,
+                   size_t *payload_size) {
     BpSAP sap;
     BpDelivery dlv;
     ZcoReader reader;
@@ -147,12 +151,12 @@ void *bp_recv_once(Sdr sdr, u_int32_t node_id, u_int32_t service_id, size_t *pay
     char eid[64];
 
     own_node_id = getOwnNodeNbr();
-    if (node_id != own_node_id) {
-        log_error("bp_recv_once: node ID mismatch. Expected %u, got %u", own_node_id, node_id);
+    if (dest_node_id != own_node_id) {
+        log_error("bp_recv_once: node ID mismatch. Expected %u, got %u", own_node_id, dest_node_id);
         return NULL;
     }
 
-    adu = find_adu(sdr, node_id, service_id);
+    adu = find_adu(sdr, dest_node_id, dest_service_id);
     if (adu != 0) {
         *payload_size = zco_source_data_length(sdr, adu);
         payload = malloc(*payload_size);
@@ -169,15 +173,15 @@ void *bp_recv_once(Sdr sdr, u_int32_t node_id, u_int32_t service_id, size_t *pay
         return payload;
     }
 
-    eid_size = snprintf(eid, sizeof(eid), "ipn:%u.%u", node_id, service_id);
+    eid_size = snprintf(eid, sizeof(eid), "ipn:%u.%u", dest_node_id, dest_service_id);
     if (eid_size < 0 || eid_size >= (int)sizeof(eid)) {
         log_error("bp_recv_once: failed to construct EID string.");
         return NULL;
     }
 
     if (bp_open(eid, &sap) < 0) {
-        log_error("bp_recv_once: failed to open BpSAP (node_id=%u service_id=%u)", node_id,
-                  service_id);
+        log_error("bp_recv_once: failed to open BpSAP (node_id=%u service_id=%u)", dest_node_id,
+                  dest_service_id);
         return NULL;
     }
 
@@ -191,7 +195,8 @@ void *bp_recv_once(Sdr sdr, u_int32_t node_id, u_int32_t service_id, size_t *pay
         goto release_dlv;
     }
 
-    if (add_adu(sdr, dlv.adu, node_id, service_id) < 0) {
+    log_info("bp_recv_once: received bundle from %s", dlv.bundleSourceEid);
+    if (add_adu(sdr, dlv.adu, dest_node_id, dest_service_id, 10, 10) < 0) {
         log_error("bp_recv_once: failed to add bundle reference.");
         goto release_dlv;
     }
