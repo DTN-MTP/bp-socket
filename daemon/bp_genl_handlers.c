@@ -99,28 +99,90 @@ void *handle_recv_thread(struct thread_args *args) {
     int err;
     struct reply_bundle reply;
 
-    reply = bp_recv_once(args->sdr, args->node_id, args->service_id);
+    reply = bp_recv_once(args->sdr, args->node_id,
+                         args->service_id); // Blocking invocation to receive a bundle
     if (!reply.is_present) {
-        log_warn("[ipn:%u.%u] REQUEST_BUNDLE: no bundle received", args->node_id, args->service_id);
-        goto out;
-    }
+        err = handle_cancel_bundle_request(args->netlink_family, args->netlink_sock, args->node_id,
+                                           args->service_id);
+        if (err < 0) {
+            log_error("[ipn:%u.%u] handle_cancel_bundle_request failed with error %d",
+                      args->node_id, args->service_id, err);
+            goto out;
+        }
 
-    err = handle_deliver_bundle(args->netlink_family, args->netlink_sock, reply.payload,
-                                reply.payload_size, reply.src_node_id, reply.src_service_id,
-                                args->node_id, args->service_id);
-    if (err < 0) {
-        log_error("[ipn:%u.%u] handle_deliver_bundle: failed with error %d", args->node_id,
-                  args->service_id, err);
-        goto out;
-    }
+        log_info("[ipn:%u.%u] CANCEL_BUNDLE_REQUEST: bundle request cancelled", args->node_id,
+                 args->service_id);
+    } else {
+        err = handle_deliver_bundle(args->netlink_family, args->netlink_sock, reply.payload,
+                                    reply.payload_size, reply.src_node_id, reply.src_service_id,
+                                    args->node_id, args->service_id);
+        if (err < 0) {
+            log_error("[ipn:%u.%u] handle_deliver_bundle: failed with error %d", args->node_id,
+                      args->service_id, err);
+            goto out;
+        }
 
-    log_info("[ipn:%u.%u] DELIVER_BUNDLE: bundle sent to kernel", reply.src_node_id,
-             reply.src_service_id);
+        log_info("[ipn:%u.%u] DELIVER_BUNDLE: bundle sent to kernel", reply.src_node_id,
+                 reply.src_service_id);
+    }
 
 out:
     if (reply.payload) free(reply.payload);
     free(args);
     return NULL;
+}
+
+int handle_cancel_bundle_request(int netlink_family, struct nl_sock *netlink_sock,
+                                 u_int32_t node_id, u_int32_t service_id) {
+    struct nl_msg *msg = NULL;
+    void *hdr;
+    int ret;
+
+    msg = nlmsg_alloc();
+    if (!msg) {
+        log_error("[ipn:%u.%u] handle_cancel_bundle_request: failed to allocate Netlink msg",
+                  node_id, service_id);
+        ret = -ENOMEM;
+        goto out;
+    }
+
+    hdr = genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, netlink_family, 0, 0,
+                      BP_GENL_CMD_CANCEL_BUNDLE_REQUEST, BP_GENL_VERSION);
+    if (!hdr) {
+        log_error("[ipn:%u.%u] handle_cancel_bundle_request: failed to create Netlink header",
+                  node_id, service_id);
+        ret = -EMSGSIZE;
+        goto err_free_msg;
+    }
+
+    if (nla_put_u32(msg, BP_GENL_A_DEST_NODE_ID, node_id) < 0) {
+        log_error("[ipn:%u.%u] handle_cancel_bundle_request: failed to add NODE_ID attribute",
+                  node_id, service_id);
+        ret = -EMSGSIZE;
+        goto err_free_msg;
+    }
+
+    if (nla_put_u32(msg, BP_GENL_A_DEST_SERVICE_ID, service_id) < 0) {
+        log_error("[ipn:%u.%u] handle_cancel_bundle_request: failed to add SERVICE_ID attribute",
+                  node_id, service_id);
+        ret = -EMSGSIZE;
+        goto err_free_msg;
+    }
+
+    ret = nl_send_sync(netlink_sock, msg);
+    if (ret < 0) {
+        log_error("[ipn:%u.%u] handle_cancel_bundle_request: bundle request not cancelled", node_id,
+                  service_id);
+        ret = -errno;
+        goto out;
+    }
+
+    return 0;
+
+err_free_msg:
+    nlmsg_free(msg);
+out:
+    return ret;
 }
 
 int handle_deliver_bundle(int netlink_family, struct nl_sock *netlink_sock, void *payload,

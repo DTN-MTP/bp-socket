@@ -21,8 +21,9 @@ struct bp_sock {
 	struct sock sk;
 	u_int32_t bp_node_id;
 	u_int8_t bp_service_id;
-	struct sk_buff_head queue;
-	wait_queue_head_t wait_queue;
+	struct sk_buff_head rx_queue;
+	wait_queue_head_t rx_waitq;
+	bool rx_canceled;
 };
 
 int bp_bind(struct socket* sock, struct sockaddr* addr, int addr_len);

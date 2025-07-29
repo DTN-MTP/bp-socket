@@ -28,8 +28,8 @@ static struct sock* bp_alloc_socket(struct net* net, int kern)
 		sock_init_data(NULL, sk);
 
 		bp = bp_sk(sk);
-		skb_queue_head_init(&bp->queue);
-		init_waitqueue_head(&bp->wait_queue);
+		skb_queue_head_init(&bp->rx_queue);
+		init_waitqueue_head(&bp->rx_waitq);
 		bp->bp_node_id = 0;
 		bp->bp_service_id = 0;
 	}
@@ -178,7 +178,7 @@ int bp_release(struct socket* sock)
 		write_lock_bh(&bp_list_lock);
 		sk_del_node_init(sk);
 		write_unlock_bh(&bp_list_lock);
-		skb_queue_purge(&bp->queue);
+		skb_queue_purge(&bp->rx_queue);
 
 		sock->sk = NULL;
 		release_sock(sk);
@@ -302,9 +302,15 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 	}
 
 	ret = wait_event_interruptible(
-	    bp->wait_queue, !skb_queue_empty(&bp->queue));
+	    bp->rx_waitq, !skb_queue_empty(&bp->rx_queue) || bp->rx_canceled);
 	if (ret < 0) {
 		pr_err("bp_recvmsg: interrupted while waiting\n");
+		goto out;
+	}
+
+	if (bp->rx_canceled) {
+		pr_info("bp_recvmsg: bundle request canceled\n");
+		ret = -ECANCELED;
 		goto out;
 	}
 
@@ -314,7 +320,7 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 		goto out;
 	}
 
-	skb = skb_dequeue(&bp->queue);
+	skb = skb_dequeue(&bp->rx_queue);
 	if (!skb) {
 		pr_info("bp_recvmsg: no messages in the queue for service %d\n",
 		    bp->bp_service_id);

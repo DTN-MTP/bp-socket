@@ -13,12 +13,19 @@ static const struct nla_policy nla_policy[BP_GENL_A_MAX + 1] = {
 };
 
 static struct genl_ops genl_ops[] = { {
-    .cmd = BP_GENL_CMD_DELIVER_BUNDLE,
-    .flags = GENL_ADMIN_PERM,
-    .policy = nla_policy,
-    .doit = deliver_bundle_doit,
-    .dumpit = NULL,
-} };
+					  .cmd = BP_GENL_CMD_DELIVER_BUNDLE,
+					  .flags = GENL_ADMIN_PERM,
+					  .policy = nla_policy,
+					  .doit = deliver_bundle_doit,
+					  .dumpit = NULL,
+				      },
+	{
+	    .cmd = BP_GENL_CMD_CANCEL_BUNDLE_REQUEST,
+	    .flags = GENL_ADMIN_PERM,
+	    .policy = nla_policy,
+	    .doit = cancel_bundle_request_doit,
+	    .dumpit = NULL,
+	} };
 
 /* Multicast groups for our family */
 static const struct genl_multicast_group genl_mcgrps[] = {
@@ -147,6 +154,44 @@ out:
 	return ret;
 }
 
+int cancel_bundle_request_doit(struct sk_buff* skb, struct genl_info* info)
+{
+	struct sock* sk;
+	struct bp_sock* bp;
+	u_int32_t dest_node_id, dest_service_id;
+
+	if (!info->attrs[BP_GENL_A_DEST_NODE_ID]
+	    || !info->attrs[BP_GENL_A_DEST_SERVICE_ID]) {
+		pr_err("cancel_bundle_request: missing required attributes\n");
+		return -EINVAL;
+	}
+
+	dest_node_id = nla_get_u32(info->attrs[BP_GENL_A_DEST_NODE_ID]);
+	dest_service_id = nla_get_u32(info->attrs[BP_GENL_A_DEST_SERVICE_ID]);
+
+	read_lock_bh(&bp_list_lock);
+	sk_for_each(sk, &bp_list)
+	{
+		bh_lock_sock(sk);
+		bp = bp_sk(sk);
+
+		if (bp->bp_node_id == dest_node_id
+		    && bp->bp_service_id == dest_service_id) {
+
+			if (waitqueue_active(&bp->rx_waitq)) {
+				bp->rx_canceled = true;
+				wake_up_interruptible(&bp->rx_waitq);
+			}
+			bh_unlock_sock(sk);
+			break;
+		}
+		bh_unlock_sock(sk);
+	}
+	read_unlock_bh(&bp_list_lock);
+
+	return 0;
+}
+
 int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 {
 	struct sock* sk;
@@ -194,10 +239,11 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 		if (bp->bp_node_id == dest_node_id
 		    && bp->bp_service_id == dest_service_id) {
 
-			skb_queue_tail(&bp->queue, new_skb);
+			skb_queue_tail(&bp->rx_queue, new_skb);
 			new_skb_queued = true;
-			if (waitqueue_active(&bp->wait_queue))
-				wake_up_interruptible(&bp->wait_queue);
+			if (waitqueue_active(&bp->rx_waitq)) {
+				wake_up_interruptible(&bp->rx_waitq);
+			}
 			bh_unlock_sock(sk);
 			break;
 		}
