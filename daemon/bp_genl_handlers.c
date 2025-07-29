@@ -18,13 +18,14 @@
 int handle_send_bundle(Daemon *daemon, struct nlattr **attrs) {
     void *payload;
     size_t payload_size;
-    u_int32_t node_id, service_id;
+    u_int32_t dest_node_id, dest_service_id, src_node_id, src_service_id;
     char dest_eid[64];
     int err = 0;
     int written;
 
     if (!attrs[BP_GENL_A_PAYLOAD] || !attrs[BP_GENL_A_DEST_NODE_ID] ||
-        !attrs[BP_GENL_A_DEST_SERVICE_ID]) {
+        !attrs[BP_GENL_A_DEST_SERVICE_ID] || !attrs[BP_GENL_A_SRC_NODE_ID] ||
+        !attrs[BP_GENL_A_SRC_SERVICE_ID]) {
         log_error(
             "handle_send_bundle: missing attribute(s) in SEND_BUNDLE command (payload, node ID, "
             "service ID)");
@@ -33,25 +34,27 @@ int handle_send_bundle(Daemon *daemon, struct nlattr **attrs) {
 
     payload = nla_data(attrs[BP_GENL_A_PAYLOAD]);
     payload_size = nla_len(attrs[BP_GENL_A_PAYLOAD]);
-    node_id = nla_get_u32(attrs[BP_GENL_A_DEST_NODE_ID]);
-    service_id = nla_get_u32(attrs[BP_GENL_A_DEST_SERVICE_ID]);
+    dest_node_id = nla_get_u32(attrs[BP_GENL_A_DEST_NODE_ID]);
+    dest_service_id = nla_get_u32(attrs[BP_GENL_A_DEST_SERVICE_ID]);
+    src_node_id = nla_get_u32(attrs[BP_GENL_A_SRC_NODE_ID]);
+    src_service_id = nla_get_u32(attrs[BP_GENL_A_SRC_SERVICE_ID]);
 
-    written = snprintf(dest_eid, sizeof(dest_eid), "ipn:%u.%u", node_id, service_id);
+    written = snprintf(dest_eid, sizeof(dest_eid), "ipn:%u.%u", dest_node_id, dest_service_id);
     if (written < 0 || written >= (int)sizeof(dest_eid)) {
-        log_error("[ipn:%u.%u] handle_send_bundle: failed to construct EID string", node_id,
-                  service_id);
+        log_error("[ipn:%u.%u] handle_send_bundle: failed to construct EID string", src_node_id,
+                  src_service_id);
         return -EINVAL;
     }
 
     err = bp_send_to_eid(daemon->sdr, payload, payload_size, dest_eid);
     if (err < 0) {
-        log_error("[ipn:%u.%u] handle_send_bundle: bp_send_to_eid failed with error %d", node_id,
-                  service_id, err);
+        log_error("[ipn:%u.%u] handle_send_bundle: bp_send_to_eid failed with error %d",
+                  dest_node_id, dest_service_id, err);
         return err;
     }
 
-    log_info("[ipn:%u.%u] SEND_BUNDLE: bundle sent to EID %s, size %d (bytes)", node_id, service_id,
-             dest_eid, payload_size);
+    log_info("[ipn:%u.%u] SEND_BUNDLE: bundle sent to EID %s, size %d (bytes)", src_node_id,
+             src_service_id, dest_eid, payload_size);
 
     return 0;
 }
@@ -122,8 +125,8 @@ void *handle_recv_thread(struct thread_args *args) {
             goto out;
         }
 
-        log_info("[ipn:%u.%u] DELIVER_BUNDLE: bundle sent to kernel", reply.src_node_id,
-                 reply.src_service_id);
+        log_info("[ipn:%u.%u] DELIVER_BUNDLE: bundle sent to kernel", args->node_id,
+                 args->service_id);
     }
 
 out:

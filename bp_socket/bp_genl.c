@@ -45,15 +45,16 @@ struct genl_family genl_fam = {
 };
 
 int send_bundle_doit(void* payload, size_t payload_size, u_int32_t dest_node_id,
-    u_int32_t dest_service_id, int port_id)
+    u_int32_t dest_service_id, u_int32_t src_node_id, u_int32_t src_service_id,
+    int port_id)
 {
 	void* msg_head;
 	struct sk_buff* msg;
 	size_t msg_size;
 	int ret;
 
-	msg_size = nla_total_size(sizeof(u_int32_t))
-	    + nla_total_size(sizeof(u_int32_t)) + nla_total_size(payload_size);
+	msg_size = 4 * nla_total_size(sizeof(u_int32_t))
+	    + nla_total_size(payload_size);
 	msg = genlmsg_new(msg_size, GFP_KERNEL);
 	if (!msg) {
 		pr_err("send_bundle: failed to allocate message buffer\n");
@@ -80,6 +81,22 @@ int send_bundle_doit(void* payload, size_t payload_size, u_int32_t dest_node_id,
 	ret = nla_put_u32(msg, BP_GENL_A_DEST_SERVICE_ID, dest_service_id);
 	if (ret) {
 		pr_err("send_bundle: failed to put BP_GENL_A_DEST_SERVICE_ID "
+		       "(%d)\n",
+		    ret);
+		goto err_cancel;
+	}
+
+	ret = nla_put_u32(msg, BP_GENL_A_SRC_NODE_ID, src_node_id);
+	if (ret) {
+		pr_err(
+		    "send_bundle: failed to put BP_GENL_A_SRC_NODE_ID (%d)\n",
+		    ret);
+		goto err_cancel;
+	}
+
+	ret = nla_put_u32(msg, BP_GENL_A_SRC_SERVICE_ID, src_service_id);
+	if (ret) {
+		pr_err("send_bundle: failed to put BP_GENL_A_SRC_SERVICE_ID "
 		       "(%d)\n",
 		    ret);
 		goto err_cancel;

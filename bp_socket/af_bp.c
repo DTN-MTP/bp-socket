@@ -192,9 +192,15 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 {
 	struct sockaddr_bp* addr;
 	void* payload;
-	u_int32_t service_id;
-	u_int32_t node_id;
+	u_int32_t dest_node_id, dest_service_id;
 	int ret;
+	struct bp_sock* bp = bp_sk(sock->sk);
+
+	if (bp->bp_node_id == 0 || bp->bp_service_id == 0) {
+		pr_err("bp_sendmsg: socket must be bound before sending\n");
+		ret = -EADDRNOTAVAIL;
+		goto out;
+	}
 
 	if (!msg->msg_name) {
 		pr_err("bp_sendmsg: no destination address provided\n");
@@ -226,21 +232,21 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 		goto out;
 	}
 
-	service_id = addr->bp_addr.ipn.service_id;
-	node_id = addr->bp_addr.ipn.node_id;
+	dest_node_id = addr->bp_addr.ipn.node_id;
+	dest_service_id = addr->bp_addr.ipn.service_id;
 
 	// https://www.rfc-editor.org/rfc/rfc9758.html#name-node-numbers
-	if (node_id > 0xFFFFFFFF) {
+	if (dest_node_id > 0xFFFFFFFF) {
 		pr_err("bp_bind: invalid node ID (must be in [0;2^31])\n");
 		ret = -EINVAL;
 		goto out;
 	}
 
 	// https://www.rfc-editor.org/rfc/rfc9758.html#name-service-numbers
-	if (service_id < 1 || service_id > 0xFFFFFFFF) {
+	if (dest_service_id < 1 || dest_service_id > 0xFFFFFFFF) {
 		pr_err("bp_bind: invalid service ID %d (must be in "
 		       "[1;2^31])\n",
-		    service_id);
+		    dest_service_id);
 		ret = -EINVAL;
 		goto out;
 	}
@@ -265,8 +271,8 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 			goto err_free;
 		}
 
-		ret = send_bundle_doit(
-		    payload, size, node_id, service_id, 8443);
+		ret = send_bundle_doit(payload, size, dest_node_id,
+		    dest_service_id, bp->bp_node_id, bp->bp_service_id, 8443);
 		if (ret < 0) {
 			pr_err(
 			    "bp_sendmsg: send_bundle_doit failed (%d)\n", ret);
@@ -295,6 +301,13 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 	sk = sock->sk;
 	lock_sock(sk);
 	bp = bp_sk(sk);
+
+	if (bp->bp_node_id == 0 || bp->bp_service_id == 0) {
+		pr_err("bp_recvmsg: socket must be bound before receiving\n");
+		ret = -EADDRNOTAVAIL;
+		goto out;
+	}
+
 	ret = request_bundle_doit(bp->bp_node_id, bp->bp_service_id, 8443);
 	if (ret < 0) {
 		pr_err("bp_recvmsg: request_bundle_doit failed (%d)\n", ret);
