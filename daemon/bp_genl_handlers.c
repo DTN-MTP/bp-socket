@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "../include/bp_socket.h"
+#include "adu_ref.h"
 #include "bp.h"
 #include "bp_genl_handlers.h"
 #include "daemon.h"
@@ -95,42 +96,29 @@ int handle_request_bundle(Daemon *daemon, struct nlattr **attrs) {
 }
 
 void *handle_recv_thread(struct thread_args *args) {
-    void *payload = NULL;
-    size_t payload_size;
-    u_int32_t src_node_id, src_service_id;
     int err;
-    bool bundle_present;
-    Object adu;
+    struct reply_bundle reply;
 
-    adu = find_adu(args->sdr, args->node_id, args->service_id);
-    bundle_present = adu != 0;
-
-    payload = bp_recv_once(args->sdr, args->node_id, args->service_id, &payload_size, &src_node_id,
-                           &src_service_id);
-    if (!payload) {
-        log_error("[ipn:%u.%u] handle_recv_thread: failed to receive bundle", args->node_id,
-                  args->service_id);
+    reply = bp_recv_once(args->sdr, args->node_id, args->service_id);
+    if (!reply.is_present) {
+        log_warn("[ipn:%u.%u] REQUEST_BUNDLE: no bundle received", args->node_id, args->service_id);
         goto out;
     }
 
-    if (!bundle_present) {
-        log_info("[ipn:%u.%u] REQUEST_BUNDLE: bundle received, size %zu bytes", args->node_id,
-                 args->service_id, payload_size);
-    } else {
-        log_warn("[ipn:%u.%u] REQUEST_BUNDLE: bundle reference already present in memory, size %zu "
-                 "bytes",
-                 args->node_id, args->service_id, payload_size);
-    }
-
-    err = handle_deliver_bundle(args->netlink_family, args->netlink_sock, payload, payload_size,
-                                src_node_id, src_service_id, args->node_id, args->service_id);
+    err = handle_deliver_bundle(args->netlink_family, args->netlink_sock, reply.payload,
+                                reply.payload_size, reply.src_node_id, reply.src_service_id,
+                                args->node_id, args->service_id);
     if (err < 0) {
         log_error("[ipn:%u.%u] handle_deliver_bundle: failed with error %d", args->node_id,
                   args->service_id, err);
+        goto out;
     }
 
+    log_info("[ipn:%u.%u] DELIVER_BUNDLE: bundle sent to kernel", reply.src_node_id,
+             reply.src_service_id);
+
 out:
-    if (payload) free(payload);
+    if (reply.payload) free(reply.payload);
     free(args);
     return NULL;
 }
@@ -204,8 +192,6 @@ int handle_deliver_bundle(int netlink_family, struct nl_sock *netlink_sock, void
         goto out;
     }
 
-    log_info("[ipn:%u.%u] DELIVER_BUNDLE: bundle sent to kernel", dest_node_id, dest_service_id);
-
     return 0;
 
 err_free_msg:
@@ -216,6 +202,7 @@ out:
 
 int handle_destroy_bundle(Daemon *daemon, struct nlattr **attrs) {
     u_int32_t node_id, service_id;
+    Object adu;
     int ret = 0;
 
     if (!attrs[BP_GENL_A_DEST_NODE_ID] || !attrs[BP_GENL_A_DEST_SERVICE_ID]) {
@@ -229,10 +216,16 @@ int handle_destroy_bundle(Daemon *daemon, struct nlattr **attrs) {
     node_id = nla_get_u32(attrs[BP_GENL_A_DEST_NODE_ID]);
     service_id = nla_get_u32(attrs[BP_GENL_A_DEST_SERVICE_ID]);
 
-    ret = destroy_adu(daemon->sdr, node_id, service_id);
-    if (ret < 0) {
+    adu = remove_adu_ref(daemon->sdr, node_id, service_id);
+    if (adu == 0) {
         log_error("[ipn:%u.%u] handle_destroy_bundle: failed to destroy bundle: %s", node_id,
                   service_id, strerror(-ret));
+        goto out;
+    }
+    ret = destroy_bundle(daemon->sdr, adu);
+    if (ret < 0) {
+        log_error("[ipn:%u.%u] handle_destroy_bundle: destroy_bundle failed with error %d", node_id,
+                  service_id, ret);
         goto out;
     }
 
