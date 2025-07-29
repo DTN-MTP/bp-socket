@@ -250,7 +250,7 @@ int handle_deliver_bundle(int netlink_family, struct nl_sock *netlink_sock, void
                  "memory (no active BP socket "
                  "client)",
                  dest_node_id, dest_service_id);
-        ret = 0; // Do not return an error, just log it
+        ret = -ENODEV;
         goto out;
     }
 
