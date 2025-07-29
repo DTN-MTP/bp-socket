@@ -9,7 +9,7 @@
 #define AF_BP 28
 
 int main(int argc, char *argv[]) {
-  struct sockaddr_bp dest_addr;
+  struct sockaddr_bp dest_addr, src_addr;
   int fd;
   uint32_t node_id, service_id;
   int ret = 0;
@@ -36,6 +36,17 @@ int main(int argc, char *argv[]) {
   if (fd < 0) {
     perror("socket creation failed");
     return EXIT_FAILURE;
+  }
+
+  src_addr.bp_family = AF_BP;
+  src_addr.bp_scheme = BP_SCHEME_IPN;
+  src_addr.bp_addr.ipn.node_id = 10;
+  src_addr.bp_addr.ipn.service_id = 1;
+
+  if (bind(fd, (struct sockaddr *)&src_addr, sizeof(src_addr)) == -1) {
+    perror("Failed to bind socket");
+    ret = EXIT_FAILURE;
+    goto out;
   }
 
   dest_addr.bp_family = AF_BP;

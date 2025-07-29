@@ -1,11 +1,10 @@
 #include "ion.h"
+#include "adu_ref.h"
 #include "log.h"
 #include "sdr.h"
 #include <bp.h>
 #include <pthread.h>
 
-static struct adu_reference *adu_refs = NULL;
-static pthread_mutex_t adu_refs_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t sdrmutex = PTHREAD_MUTEX_INITIALIZER;
 
 const char *bp_result_text(BpIndResult result) {
@@ -23,82 +22,26 @@ const char *bp_result_text(BpIndResult result) {
     }
 }
 
-int add_adu(Sdr sdr, Object adu, u_int32_t node_id, u_int32_t service_id) {
-    struct adu_reference *ref;
-
-    if (pthread_mutex_lock(&adu_refs_mutex) != 0) {
-        log_error("add_adu: Failed to lock SDR mutex.");
-        return -1;
-    }
-
-    ref = malloc(sizeof(struct adu_reference));
-    if (!ref) {
-        log_error("add_adu: Failed to allocate memory for bundle reference.");
-        pthread_mutex_unlock(&adu_refs_mutex);
-        return -ENOMEM;
-    }
-
-    ref->adu = adu;
-    ref->node_id = node_id;
-    ref->service_id = service_id;
-    ref->next = adu_refs;
-    adu_refs = ref;
-
-    pthread_mutex_unlock(&adu_refs_mutex);
-    return 0;
-}
-
-Object find_adu(Sdr sdr, u_int32_t node_id, u_int32_t service_id) {
-    struct adu_reference *ref;
-
-    for (ref = adu_refs; ref != NULL; ref = ref->next) {
-        if (ref->node_id == node_id && ref->service_id == service_id) {
-            return ref->adu;
-        }
-    }
-    return 0;
-}
-
-int destroy_adu(Sdr sdr, u_int32_t node_id, u_int32_t service_id) {
-    struct adu_reference *prev = NULL;
-    struct adu_reference *current = adu_refs;
-
-    if (pthread_mutex_lock(&adu_refs_mutex) != 0) {
-        log_error("destroy_adu: Failed to lock adu_refs mutex.");
+int destroy_bundle(Sdr sdr, Object adu) {
+    if (pthread_mutex_lock(&sdrmutex) != 0) {
+        log_error("destroy_bundle: Failed to lock SDR mutex.");
         return -EAGAIN;
     }
 
-    while (current) {
-        if (current->node_id == node_id && current->service_id == service_id) {
-            if (prev) {
-                prev->next = current->next;
-            } else {
-                adu_refs = current->next;
-            }
-
-            if (pthread_mutex_lock(&sdrmutex) != 0) {
-                log_error("destroy_adu: Failed to lock SDR mutex.");
-                free(current);
-                pthread_mutex_unlock(&adu_refs_mutex);
-                return -EAGAIN;
-            }
-
-            zco_destroy(sdr, current->adu);
-            free(current);
-            pthread_mutex_unlock(&sdrmutex);
-            pthread_mutex_unlock(&adu_refs_mutex);
-            return 0;
-        }
-        prev = current;
-        current = current->next;
+    if (sdr_begin_xn(sdr) == 0) {
+        log_error("destroy_bundle: sdr_begin_xn failed.");
+        pthread_mutex_unlock(&sdrmutex);
+        return -EIO;
     }
 
-    pthread_mutex_unlock(&adu_refs_mutex);
-    log_warn("destroy_adu: no bundle found (ipn:%u.%u)", node_id, service_id);
-    return -ENOENT;
+    zco_destroy(sdr, adu);
+
+    sdr_end_xn(sdr);
+    pthread_mutex_unlock(&sdrmutex);
+    return 0;
 }
 
-int bp_send_to_eid(Sdr sdr, void *payload, int payload_size, char *dest_eid, int eid_size) {
+int bp_send_to_eid(Sdr sdr, void *payload, size_t payload_size, char *dest_eid) {
     Object sdr_buffer = 0;
     Object adu;
     int ret = 0;
@@ -120,122 +63,160 @@ int bp_send_to_eid(Sdr sdr, void *payload, int payload_size, char *dest_eid, int
     adu = zco_create(sdr, ZcoSdrSource, sdr_buffer, 0, payload_size, ZcoOutbound);
     if (adu <= 0) {
         log_error("zco_create failed.");
+        sdr_free(sdr, sdr_buffer);
         ret = -ENOMEM;
         goto out;
     }
 
     if (bp_send(NULL, dest_eid, NULL, 86400, BP_STD_PRIORITY, 0, 0, 0, NULL, adu, NULL) <= 0) {
         log_error("bp_send failed.");
+        sdr_free(sdr, sdr_buffer);
         ret = -EIO;
         goto out;
     }
 
 out:
-    if (sdr_buffer != 0) sdr_free(sdr, sdr_buffer);
     sdr_end_xn(sdr);
     return ret;
 }
 
-void *bp_recv_once(Sdr sdr, u_int32_t node_id, u_int32_t service_id, size_t *payload_size) {
+struct reply_bundle bp_recv_once(Sdr sdr, u_int32_t dest_node_id, u_int32_t dest_service_id) {
     BpSAP sap;
     BpDelivery dlv;
     ZcoReader reader;
-    Object adu;
+    struct adu_reference *adu_ref;
     u_int32_t own_node_id;
     void *payload = NULL;
+    size_t payload_size;
     int eid_size;
     char eid[64];
+    struct reply_bundle reply = {0};
+    u_int32_t src_node_id, src_service_id;
+
+    reply.is_present = false;
+    reply.payload = NULL;
 
     own_node_id = getOwnNodeNbr();
-    if (node_id != own_node_id) {
-        log_error("bp_recv_once: node ID mismatch. Expected %u, got %u", own_node_id, node_id);
-        return NULL;
+    if (dest_node_id != own_node_id) {
+        log_error("bp_recv_once: node ID mismatch. Expected %u, got %u", own_node_id, dest_node_id);
+        goto out;
     }
 
-    adu = find_adu(sdr, node_id, service_id);
-    if (adu != 0) {
-        *payload_size = zco_source_data_length(sdr, adu);
-        payload = malloc(*payload_size);
+    adu_ref = find_adu_ref(sdr, dest_node_id, dest_service_id);
+    if (adu_ref != NULL) {
+        payload_size = zco_source_data_length(sdr, adu_ref->adu);
+        payload = malloc(payload_size);
         if (!payload) {
             log_error("bp_recv_once: Failed to allocate memory for payload.");
-            return NULL;
+            goto out;
         }
-        zco_start_receiving(adu, &reader);
-        if (zco_receive_source(sdr, &reader, *payload_size, payload) < 0) {
+        zco_start_receiving(adu_ref->adu, &reader);
+        if (zco_receive_source(sdr, &reader, payload_size, payload) < 0) {
+            log_error("bp_recv_once: zco_receive_source failed.");
+            goto out;
+        }
+
+        src_node_id = adu_ref->src_node_id;
+        src_service_id = adu_ref->src_service_id;
+    } else {
+        eid_size = snprintf(eid, sizeof(eid), "ipn:%u.%u", dest_node_id, dest_service_id);
+        if (eid_size < 0 || eid_size >= (int)sizeof(eid)) {
+            log_error("bp_recv_once: failed to construct EID string.");
+            goto out;
+        }
+
+        if (bp_open(eid, &sap) < 0) {
+            log_error("bp_recv_once: failed to open BpSAP (node_id=%u service_id=%u)", dest_node_id,
+                      dest_service_id);
+            goto out;
+        }
+
+        if (bp_receive(sap, &dlv, BP_BLOCKING) < 0) {
+            log_error("bp_recv_once: bundle reception failed.");
+            bp_close(sap);
+            goto out;
+        }
+
+        if (dlv.result != BpPayloadPresent || dlv.adu == 0) {
+            log_error("bp_recv_once: %s", bp_result_text(dlv.result));
+            bp_release_delivery(&dlv, 0);
+            bp_close(sap);
+            goto out;
+        }
+
+        if (sscanf(dlv.bundleSourceEid, "ipn:%u.%u", &src_node_id, &src_service_id) != 2) {
+            log_error("bp_recv_once: failed to parse bundleSourceEid: %s", dlv.bundleSourceEid);
+            bp_release_delivery(&dlv, 0);
+            bp_close(sap);
+            goto out;
+        }
+
+        if (add_adu(sdr, dlv.adu, dest_node_id, dest_service_id, src_node_id, src_service_id) < 0) {
+            log_error("bp_recv_once: failed to add bundle reference.");
+            bp_release_delivery(&dlv, 0);
+            bp_close(sap);
+            goto out;
+        }
+
+        if (pthread_mutex_lock(&sdrmutex) != 0) {
+            log_error("bp_recv_once: Failed to lock SDR mutex.");
+            bp_release_delivery(&dlv, 0);
+            bp_close(sap);
+            goto out;
+        }
+
+        if (sdr_begin_xn(sdr) == 0) {
+            log_error("bp_recv_once: sdr_begin_xn failed.");
+            pthread_mutex_unlock(&sdrmutex);
+            bp_release_delivery(&dlv, 0);
+            bp_close(sap);
+            goto out;
+        }
+
+        payload_size = zco_source_data_length(sdr, dlv.adu);
+        payload = malloc(payload_size);
+        if (!payload) {
+            log_error("bp_recv_once: Failed to allocate memory for payload.");
+            sdr_end_xn(sdr);
+            pthread_mutex_unlock(&sdrmutex);
+            bp_release_delivery(&dlv, 0);
+            bp_close(sap);
+            goto out;
+        }
+
+        zco_start_receiving(dlv.adu, &reader);
+        if (zco_receive_source(sdr, &reader, payload_size, payload) < 0) {
             log_error("bp_recv_once: zco_receive_source failed.");
             free(payload);
-            return NULL;
+            payload = NULL;
+            sdr_end_xn(sdr);
+            pthread_mutex_unlock(&sdrmutex);
+            bp_release_delivery(&dlv, 0);
+            bp_close(sap);
+            goto out;
         }
-        return payload;
-    }
 
-    eid_size = snprintf(eid, sizeof(eid), "ipn:%u.%u", node_id, service_id);
-    if (eid_size < 0 || eid_size >= (int)sizeof(eid)) {
-        log_error("bp_recv_once: failed to construct EID string.");
-        return NULL;
-    }
-
-    if (bp_open(eid, &sap) < 0) {
-        log_error("bp_recv_once: failed to open BpSAP (node_id=%u service_id=%u)", node_id,
-                  service_id);
-        return NULL;
-    }
-
-    if (bp_receive(sap, &dlv, BP_BLOCKING) < 0) {
-        log_error("bp_recv_once: bundle reception failed.");
-        goto close_sap;
-    }
-
-    if (dlv.result != BpPayloadPresent || dlv.adu == 0) {
-        log_error("bp_recv_once: %s", bp_result_text(dlv.result));
-        goto release_dlv;
-    }
-
-    if (add_adu(sdr, dlv.adu, node_id, service_id) < 0) {
-        log_error("bp_recv_once: failed to add bundle reference.");
-        goto release_dlv;
-    }
-
-    if (pthread_mutex_lock(&sdrmutex) != 0) {
-        log_error("bp_recv_once: Failed to lock SDR mutex.");
-        goto release_dlv;
-    }
-
-    if (sdr_begin_xn(sdr) == 0) {
-        log_error("bp_recv_once: sdr_begin_xn failed.");
-        pthread_mutex_unlock(&sdrmutex);
-        goto release_dlv;
-    }
-
-    *payload_size = zco_source_data_length(sdr, dlv.adu);
-    payload = malloc(*payload_size);
-    if (!payload) {
-        log_error("bp_recv_once: Failed to allocate memory for payload.");
         sdr_end_xn(sdr);
         pthread_mutex_unlock(&sdrmutex);
-        goto release_dlv;
+        bp_release_delivery(&dlv, 0);
+        bp_close(sap);
     }
 
-    zco_start_receiving(dlv.adu, &reader);
-    if (zco_receive_source(sdr, &reader, *payload_size, payload) < 0) {
-        log_error("bp_recv_once: zco_receive_source failed.");
+    if (payload == NULL) {
+        log_info("bp_recv_once: no payload received for node_id=%u service_id=%u", dest_node_id,
+                 dest_service_id);
+        goto out;
+    }
+
+    reply.is_present = true;
+    reply.payload = payload;
+    reply.payload_size = payload_size;
+    reply.src_node_id = src_node_id;
+    reply.src_service_id = src_service_id;
+
+out:
+    if (payload && !reply.is_present) {
         free(payload);
-        payload = NULL;
-        sdr_end_xn(sdr);
-        pthread_mutex_unlock(&sdrmutex);
-        goto release_dlv;
     }
-
-    sdr_end_xn(sdr);
-    pthread_mutex_unlock(&sdrmutex);
-    bp_release_delivery(&dlv, 0);
-    bp_close(sap);
-
-    return payload;
-
-release_dlv:
-    bp_release_delivery(&dlv, 0);
-close_sap:
-    bp_close(sap);
-    return NULL;
+    return reply;
 }

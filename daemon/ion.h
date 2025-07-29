@@ -2,19 +2,18 @@
 #define ION_H
 
 #include "bp.h"
+#include <stdbool.h>
 
-struct adu_reference {
-    Object adu;
-    u_int32_t node_id;
-    u_int32_t service_id;
-    struct adu_reference *next;
+struct reply_bundle {
+    bool is_present;
+    void *payload;
+    size_t payload_size;
+    u_int32_t src_node_id;
+    u_int32_t src_service_id;
 };
 
-int add_adu(Sdr sdr, Object adu, u_int32_t node_id, u_int32_t service_id);
-Object find_adu(Sdr sdr, u_int32_t node_id, u_int32_t service_id);
-int destroy_adu(Sdr sdr, u_int32_t node_id, u_int32_t service_id);
-
-int bp_send_to_eid(Sdr sdr, void *payload, int payload_size, char *dest_eid, int eid_size);
-void *bp_recv_once(Sdr sdr, u_int32_t node_id, u_int32_t service_id, size_t *payload_size);
+int destroy_bundle(Sdr sdr, Object adu);
+int bp_send_to_eid(Sdr sdr, void *payload, size_t payload_size, char *dest_eid);
+struct reply_bundle bp_recv_once(Sdr sdr, u_int32_t dest_node_id, u_int32_t dest_service_id);
 
 #endif
