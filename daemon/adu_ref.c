@@ -7,8 +7,8 @@
 static struct adu_reference *adu_refs = NULL;
 static pthread_mutex_t adu_refs_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-int add_adu(Object adu, u_int32_t dest_node_id, u_int32_t dest_service_id,
-            u_int32_t src_node_id, u_int32_t src_service_id) {
+int add_adu(Object adu, u_int32_t dest_node_id, u_int32_t dest_service_id, u_int32_t src_node_id,
+            u_int32_t src_service_id) {
     struct adu_reference *ref;
 
     if (pthread_mutex_lock(&adu_refs_mutex) != 0) {
