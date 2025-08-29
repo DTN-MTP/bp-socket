@@ -21,10 +21,16 @@ struct bp_sock {
 	struct sock sk;
 	u_int32_t bp_node_id;
 	u_int32_t bp_service_id;
+
+	// Reception
+	struct mutex rx_mutex;
 	struct sk_buff_head rx_queue;
 	wait_queue_head_t rx_waitq;
-	wait_queue_head_t tx_waitq;
 	bool rx_canceled;
+
+	// Transmission
+	struct mutex tx_mutex;
+	wait_queue_head_t tx_waitq;
 	bool tx_confirmed;
 	bool tx_error;
 };

@@ -212,7 +212,9 @@ int cancel_bundle_request_doit(struct sk_buff* skb, struct genl_info* info)
 		    && bp->bp_service_id == dest_service_id) {
 
 			if (waitqueue_active(&bp->rx_waitq)) {
+				mutex_lock(&bp->rx_mutex);
 				bp->rx_canceled = true;
+				mutex_unlock(&bp->rx_mutex);
 				wake_up_interruptible(&bp->rx_waitq);
 			}
 			bh_unlock_sock(sk);
@@ -272,7 +274,9 @@ int deliver_bundle_doit(struct sk_buff* skb, struct genl_info* info)
 		if (bp->bp_node_id == dest_node_id
 		    && bp->bp_service_id == dest_service_id) {
 
+			mutex_lock(&bp->rx_mutex);
 			skb_queue_tail(&bp->rx_queue, new_skb);
+			mutex_unlock(&bp->rx_mutex);
 			new_skb_queued = true;
 			if (waitqueue_active(&bp->rx_waitq)) {
 				wake_up_interruptible(&bp->rx_waitq);
@@ -427,7 +431,9 @@ int send_bundle_confirmation_doit(struct sk_buff* skb, struct genl_info* info)
 		if (bp->bp_node_id == src_node_id
 		    && bp->bp_service_id == src_service_id) {
 			// Found the socket, wake it up
+			mutex_lock(&bp->tx_mutex);
 			bp->tx_confirmed = true;
+			mutex_unlock(&bp->tx_mutex);
 			wake_up(&bp->tx_waitq);
 			pr_info(
 			    "send_bundle_confirmation_doit: woke up socket for "
@@ -468,8 +474,10 @@ int send_bundle_failure_doit(struct sk_buff* skb, struct genl_info* info)
 		if (bp->bp_node_id == src_node_id
 		    && bp->bp_service_id == src_service_id) {
 			// Found the socket, mark as failed and wake it up
-			bp->tx_confirmed = true; // Mark as confirmed to wake up
-			bp->tx_error = true; // Mark as error
+			mutex_lock(&bp->tx_mutex);
+			bp->tx_confirmed = true;
+			bp->tx_error = true;
+			mutex_unlock(&bp->tx_mutex);
 			wake_up(&bp->tx_waitq);
 			pr_info("send_bundle_failure_doit: woke up socket for "
 				"ipn:%u.%u with failure\n",
