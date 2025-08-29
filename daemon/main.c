@@ -7,6 +7,9 @@
 #define NL_PID 8443
 
 int main(int argc, char *argv[]) {
+    (void)argc;
+    (void)argv;
+
     if (geteuid() != 0) {
         log_error("This program must be run as root or with CAP_NET_ADMIN (required by "
                   "GENL_ADMIN_PERM).");

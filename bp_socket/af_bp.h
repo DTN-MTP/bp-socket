@@ -23,7 +23,10 @@ struct bp_sock {
 	u_int32_t bp_service_id;
 	struct sk_buff_head rx_queue;
 	wait_queue_head_t rx_waitq;
+	wait_queue_head_t tx_waitq;
 	bool rx_canceled;
+	bool tx_confirmed;
+	bool tx_error;
 };
 
 int bp_bind(struct socket* sock, struct sockaddr* addr, int addr_len);

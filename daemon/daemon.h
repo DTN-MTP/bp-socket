@@ -10,7 +10,6 @@ typedef struct Daemon {
     const char *genl_bp_family_name;
     int genl_bp_family_id;
     unsigned int nl_pid;
-    Sdr sdr;
 
     struct event_base *base;
     struct event *event_on_sigpipe;

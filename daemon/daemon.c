@@ -1,16 +1,15 @@
 #include "daemon.h"
 #include "bp_genl.h"
+#include "ion.h"
 #include "log.h"
 #include <bp.h>
 #include <event2/event.h>
 #include <event2/util.h>
 #include <netlink/genl/genl.h>
 
-#define UNUSED(x) (void)(x)
-
 void on_sigint(evutil_socket_t fd, short event, void *arg) {
-    UNUSED(fd);
-    UNUSED(event);
+    (void)fd;
+    (void)event;
 
     struct event_base *base = arg;
     log_info("SIGINT received, exiting...");
@@ -18,8 +17,8 @@ void on_sigint(evutil_socket_t fd, short event, void *arg) {
 }
 
 void on_sigpipe(evutil_socket_t fd, short event, void *arg) {
-    UNUSED(fd);
-    UNUSED(event);
+    (void)fd;
+    (void)event;
 
     struct event_base *base = arg;
     log_info("SIGPIPE received, exiting...");
@@ -27,8 +26,8 @@ void on_sigpipe(evutil_socket_t fd, short event, void *arg) {
 }
 
 void on_netlink(evutil_socket_t fd, short event, void *arg) {
-    UNUSED(fd);
-    UNUSED(event);
+    (void)fd;
+    (void)event;
 
     Daemon *daemon = (Daemon *)arg;
     nl_recvmsgs_default(
@@ -109,7 +108,7 @@ int daemon_run(Daemon *self) {
         daemon_free(self);
         return -EAGAIN;
     }
-    self->sdr = bp_get_sdr();
+    sdr = bp_get_sdr();
     log_info("Successfully attached to ION");
 
     log_info("Daemon started successfully");

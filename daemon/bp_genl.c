@@ -76,6 +76,10 @@ int genl_bp_sock_recvmsg_cb(struct nl_msg *msg, void *arg) {
         return handle_send_bundle(daemon, attrs);
     case BP_GENL_CMD_REQUEST_BUNDLE:
         return handle_request_bundle(daemon, attrs);
+    case BP_GENL_CMD_OPEN_ENDPOINT:
+        return handle_open_endpoint(daemon, attrs);
+    case BP_GENL_CMD_CLOSE_ENDPOINT:
+        return handle_close_endpoint(daemon, attrs);
     // case BP_GENL_CMD_DELIVER_BUNDLE:
     //     return handle_deliver_bundle_reply(daemon, attrs);
     case BP_GENL_CMD_DESTROY_BUNDLE:

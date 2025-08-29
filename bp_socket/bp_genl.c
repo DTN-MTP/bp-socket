@@ -1,6 +1,7 @@
 #include "bp_genl.h"
 #include "../include/bp_socket.h"
 #include "af_bp.h"
+#include <linux/sched.h>
 #include <net/genetlink.h>
 
 static const struct nla_policy nla_policy[BP_GENL_A_MAX + 1] = {
@@ -10,6 +11,7 @@ static const struct nla_policy nla_policy[BP_GENL_A_MAX + 1] = {
 	[BP_GENL_A_DEST_NODE_ID] = { .type = NLA_U32 },
 	[BP_GENL_A_DEST_SERVICE_ID] = { .type = NLA_U32 },
 	[BP_GENL_A_PAYLOAD] = { .type = NLA_BINARY },
+	[BP_GENL_A_ERROR_CODE] = { .type = NLA_U32 },
 };
 
 static struct genl_ops genl_ops[] = { {
@@ -24,6 +26,20 @@ static struct genl_ops genl_ops[] = { {
 	    .flags = GENL_ADMIN_PERM,
 	    .policy = nla_policy,
 	    .doit = cancel_bundle_request_doit,
+	    .dumpit = NULL,
+	},
+	{
+	    .cmd = BP_GENL_CMD_SEND_BUNDLE_CONFIRMATION,
+	    .flags = GENL_ADMIN_PERM,
+	    .policy = nla_policy,
+	    .doit = send_bundle_confirmation_doit,
+	    .dumpit = NULL,
+	},
+	{
+	    .cmd = BP_GENL_CMD_SEND_BUNDLE_FAILURE,
+	    .flags = GENL_ADMIN_PERM,
+	    .policy = nla_policy,
+	    .doit = send_bundle_failure_doit,
 	    .dumpit = NULL,
 	} };
 
@@ -318,6 +334,188 @@ int destroy_bundle_doit(
 	ret = nla_put_u32(msg, BP_GENL_A_DEST_SERVICE_ID, dest_service_id);
 	if (ret) {
 		pr_err("destroy_bundle: failed to put "
+		       "BP_GENL_A_DEST_SERVICE_ID (%d)\n",
+		    ret);
+		goto err_cancel;
+	}
+
+	genlmsg_end(msg, msg_head);
+	return genlmsg_unicast(&init_net, msg, port_id);
+
+err_cancel:
+	genlmsg_cancel(msg, msg_head);
+err_free:
+	nlmsg_free(msg);
+out:
+	return ret;
+}
+
+int open_endpoint_doit(u_int32_t node_id, u_int32_t service_id, int port_id)
+{
+	void* msg_head;
+	struct sk_buff* msg;
+	size_t msg_size;
+	int ret;
+
+	msg_size = 2 * nla_total_size(sizeof(u_int32_t));
+	msg = genlmsg_new(msg_size, GFP_KERNEL);
+	if (!msg) {
+		pr_err("open_endpoint: failed to allocate message buffer\n");
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	msg_head
+	    = genlmsg_put(msg, 0, 0, &genl_fam, 0, BP_GENL_CMD_OPEN_ENDPOINT);
+	if (!msg_head) {
+		pr_err("open_endpoint: failed to create genetlink header\n");
+		ret = -EMSGSIZE;
+		goto err_free;
+	}
+
+	ret = nla_put_u32(msg, BP_GENL_A_DEST_NODE_ID, node_id);
+	if (ret) {
+		pr_err("open_endpoint: failed to put BP_GENL_A_DEST_NODE_ID "
+		       "(%d)\n",
+		    ret);
+		goto err_cancel;
+	}
+
+	ret = nla_put_u32(msg, BP_GENL_A_DEST_SERVICE_ID, service_id);
+	if (ret) {
+		pr_err("open_endpoint: failed to put BP_GENL_A_DEST_SERVICE_ID "
+		       "(%d)\n",
+		    ret);
+		goto err_cancel;
+	}
+
+	genlmsg_end(msg, msg_head);
+	return genlmsg_unicast(&init_net, msg, port_id);
+
+err_cancel:
+	genlmsg_cancel(msg, msg_head);
+err_free:
+	nlmsg_free(msg);
+out:
+	return ret;
+}
+
+int send_bundle_confirmation_doit(struct sk_buff* skb, struct genl_info* info)
+{
+	u_int32_t src_node_id, src_service_id;
+	struct sock* sk;
+	struct bp_sock* bp;
+
+	if (!info->attrs[BP_GENL_A_SRC_NODE_ID]
+	    || !info->attrs[BP_GENL_A_SRC_SERVICE_ID]) {
+		pr_err("send_bundle_confirmation_doit: missing attribute(s)\n");
+		return -EINVAL;
+	}
+
+	src_node_id = nla_get_u32(info->attrs[BP_GENL_A_SRC_NODE_ID]);
+	src_service_id = nla_get_u32(info->attrs[BP_GENL_A_SRC_SERVICE_ID]);
+
+	pr_info("send_bundle_confirmation_doit: received confirmation for "
+		"ipn:%u.%u\n",
+	    src_node_id, src_service_id);
+
+	// Find the socket waiting for confirmation
+	read_lock_bh(&bp_list_lock);
+	sk_for_each(sk, &bp_list)
+	{
+		bp = bp_sk(sk);
+		if (bp->bp_node_id == src_node_id
+		    && bp->bp_service_id == src_service_id) {
+			// Found the socket, wake it up
+			bp->tx_confirmed = true;
+			wake_up(&bp->tx_waitq);
+			pr_info(
+			    "send_bundle_confirmation_doit: woke up socket for "
+			    "ipn:%u.%u\n",
+			    src_node_id, src_service_id);
+			break;
+		}
+	}
+	read_unlock_bh(&bp_list_lock);
+
+	return 0;
+}
+
+int send_bundle_failure_doit(struct sk_buff* skb, struct genl_info* info)
+{
+	u_int32_t src_node_id, src_service_id;
+	struct sock* sk;
+	struct bp_sock* bp;
+
+	if (!info->attrs[BP_GENL_A_SRC_NODE_ID]
+	    || !info->attrs[BP_GENL_A_SRC_SERVICE_ID]) {
+		pr_err("send_bundle_failure_doit: missing attribute(s)\n");
+		return -EINVAL;
+	}
+
+	src_node_id = nla_get_u32(info->attrs[BP_GENL_A_SRC_NODE_ID]);
+	src_service_id = nla_get_u32(info->attrs[BP_GENL_A_SRC_SERVICE_ID]);
+
+	pr_info("send_bundle_failure_doit: received failure notification for "
+		"ipn:%u.%u\n",
+	    src_node_id, src_service_id);
+
+	// Find the socket waiting for confirmation and mark it as failed
+	read_lock_bh(&bp_list_lock);
+	sk_for_each(sk, &bp_list)
+	{
+		bp = bp_sk(sk);
+		if (bp->bp_node_id == src_node_id
+		    && bp->bp_service_id == src_service_id) {
+			// Found the socket, mark as failed and wake it up
+			bp->tx_confirmed = true; // Mark as confirmed to wake up
+			bp->tx_error = true; // Mark as error
+			wake_up(&bp->tx_waitq);
+			pr_info("send_bundle_failure_doit: woke up socket for "
+				"ipn:%u.%u with failure\n",
+			    src_node_id, src_service_id);
+			break;
+		}
+	}
+	read_unlock_bh(&bp_list_lock);
+
+	return 0;
+}
+
+int close_endpoint_doit(u_int32_t node_id, u_int32_t service_id, int port_id)
+{
+	void* msg_head;
+	struct sk_buff* msg;
+	size_t msg_size;
+	int ret;
+
+	msg_size = 2 * nla_total_size(sizeof(u_int32_t));
+	msg = genlmsg_new(msg_size, GFP_KERNEL);
+	if (!msg) {
+		pr_err("close_endpoint: failed to allocate message buffer\n");
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	msg_head
+	    = genlmsg_put(msg, 0, 0, &genl_fam, 0, BP_GENL_CMD_CLOSE_ENDPOINT);
+	if (!msg_head) {
+		pr_err("close_endpoint: failed to create genetlink header\n");
+		ret = -EMSGSIZE;
+		goto err_free;
+	}
+
+	ret = nla_put_u32(msg, BP_GENL_A_DEST_NODE_ID, node_id);
+	if (ret) {
+		pr_err("close_endpoint: failed to put BP_GENL_A_DEST_NODE_ID "
+		       "(%d)\n",
+		    ret);
+		goto err_cancel;
+	}
+
+	ret = nla_put_u32(msg, BP_GENL_A_DEST_SERVICE_ID, service_id);
+	if (ret) {
+		pr_err("close_endpoint: failed to put "
 		       "BP_GENL_A_DEST_SERVICE_ID (%d)\n",
 		    ret);
 		goto err_cancel;
