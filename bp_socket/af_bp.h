@@ -20,7 +20,7 @@ extern const struct net_proto_family bp_family_ops;
 struct bp_sock {
 	struct sock sk;
 	u_int32_t bp_node_id;
-	u_int8_t bp_service_id;
+	u_int32_t bp_service_id;
 	struct sk_buff_head rx_queue;
 	wait_queue_head_t rx_waitq;
 	bool rx_canceled;

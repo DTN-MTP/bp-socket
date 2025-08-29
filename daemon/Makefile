@@ -1,6 +1,6 @@
 CC := gcc
-CFLAGS := -Wall -Wno-deprecated-declarations -g
-LDFLAGS := -lpthread -lbp -lici -lm \
+CFLAGS := -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wformat=2 -Wvla -fstack-protector-strong -D_FORTIFY_SOURCE=3 -fPIE -g -Wno-deprecated-declarations
+LDFLAGS := -Wl,-z,relro,-z,now -pie -lpthread -lbp -lici -lm \
 	$(shell pkg-config --libs libevent libnl-genl-3.0)
 
 INCLUDES := $(shell pkg-config --cflags libnl-3.0)
@@ -15,7 +15,7 @@ SRC_FILES := $(wildcard *.c *.h)
 
 all: $(EXEC)
 
-release: CFLAGS := -Wall -Wno-deprecated-declarations -O3 -DNO_LOG
+release: CFLAGS := -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wformat=2 -Wvla -fstack-protector-strong -D_FORTIFY_SOURCE=3 -fPIE -O3 -DNO_LOG -Wno-deprecated-declarations
 release: all
 
 $(EXEC): $(OBJECTS)

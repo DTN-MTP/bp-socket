@@ -12,9 +12,9 @@ struct adu_reference {
     struct adu_reference *next;
 };
 
-int add_adu(Sdr sdr, Object adu, u_int32_t dest_node_id, u_int32_t dest_service_id,
-            u_int32_t src_node_id, u_int32_t src_service_id);
-struct adu_reference *find_adu_ref(Sdr sdr, u_int32_t dest_node_id, u_int32_t dest_service_id);
-Object remove_adu_ref(Sdr sdr, u_int32_t dest_node_id, u_int32_t dest_service_id);
+int add_adu(Object adu, u_int32_t dest_node_id, u_int32_t dest_service_id, u_int32_t src_node_id,
+            u_int32_t src_service_id);
+struct adu_reference *find_adu_ref(u_int32_t dest_node_id, u_int32_t dest_service_id);
+Object remove_adu_ref(u_int32_t dest_node_id, u_int32_t dest_service_id);
 
 #endif

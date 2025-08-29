@@ -7,7 +7,7 @@
 
 typedef struct Daemon {
     struct nl_sock *genl_bp_sock;
-    char *genl_bp_family_name;
+    const char *genl_bp_family_name;
     int genl_bp_family_id;
     unsigned int nl_pid;
     Sdr sdr;

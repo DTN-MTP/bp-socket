@@ -67,7 +67,7 @@ int genl_bp_sock_recvmsg_cb(struct nl_msg *msg, void *arg) {
     err = nla_parse(attrs, BP_GENL_A_MAX, genlmsg_attrdata(genlhdr, 0), genlmsg_attrlen(genlhdr, 0),
                     NULL);
     if (err < 0) {
-        log_error("Failed to parse Netlink attributes: %s", strerror(-err));
+        log_error("Failed to parse Netlink attributes: %s", nl_geterror(err));
         return NL_SKIP;
     }
 

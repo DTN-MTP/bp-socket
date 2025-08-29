@@ -17,7 +17,7 @@ int handle_request_bundle(Daemon *daemon, struct nlattr **attrs);
 int handle_cancel_bundle_request(int netlink_family, struct nl_sock *netlink_sock,
                                  u_int32_t node_id, u_int32_t service_id);
 int handle_deliver_bundle(int netlink_family, struct nl_sock *netlink_sock, void *payload,
-                          int payload_size, u_int32_t src_node_id, u_int32_t src_service_id,
+                          size_t payload_size, u_int32_t src_node_id, u_int32_t src_service_id,
                           u_int32_t dest_node_id, u_int32_t dest_service_id);
 int handle_destroy_bundle(Daemon *daemon, struct nlattr **attrs);
 

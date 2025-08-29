@@ -294,7 +294,7 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 {
 	struct sock* sk;
 	struct bp_sock* bp;
-	struct sk_buff* skb;
+	struct sk_buff* skb = NULL;
 	struct sockaddr_bp* src_addr;
 	int ret;
 

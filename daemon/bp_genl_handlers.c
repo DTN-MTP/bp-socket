@@ -14,6 +14,7 @@
 #include "daemon.h"
 #include "ion.h"
 #include "log.h"
+#include <errno.h>
 
 int handle_send_bundle(Daemon *daemon, struct nlattr **attrs) {
     void *payload;
@@ -33,7 +34,7 @@ int handle_send_bundle(Daemon *daemon, struct nlattr **attrs) {
     }
 
     payload = nla_data(attrs[BP_GENL_A_PAYLOAD]);
-    payload_size = nla_len(attrs[BP_GENL_A_PAYLOAD]);
+    payload_size = (size_t)nla_len(attrs[BP_GENL_A_PAYLOAD]);
     dest_node_id = nla_get_u32(attrs[BP_GENL_A_DEST_NODE_ID]);
     dest_service_id = nla_get_u32(attrs[BP_GENL_A_DEST_SERVICE_ID]);
     src_node_id = nla_get_u32(attrs[BP_GENL_A_SRC_NODE_ID]);
@@ -76,8 +77,7 @@ int handle_request_bundle(Daemon *daemon, struct nlattr **attrs) {
 
     args = malloc(sizeof(struct thread_args));
     if (!args) {
-        log_error("[ipn:%u.%u] handle_send_bundle: failed to allocate thread args", args->node_id,
-                  args->service_id);
+        log_error("handle_request_bundle: failed to allocate thread args", node_id, service_id);
         return -ENOMEM;
     }
     args->node_id = node_id;
@@ -90,6 +90,7 @@ int handle_request_bundle(Daemon *daemon, struct nlattr **attrs) {
     if (pthread_create(&thread, NULL, (void *(*)(void *))handle_recv_thread, args) != 0) {
         log_error("[ipn:%u.%u] handle_request_bundle: failed to create receive thread: %s", node_id,
                   service_id, strerror(errno));
+        free(args);
         return -errno;
     }
 
@@ -189,8 +190,13 @@ out:
 }
 
 int handle_deliver_bundle(int netlink_family, struct nl_sock *netlink_sock, void *payload,
-                          int payload_size, u_int32_t src_node_id, u_int32_t src_service_id,
+                          size_t payload_size, u_int32_t src_node_id, u_int32_t src_service_id,
                           u_int32_t dest_node_id, u_int32_t dest_service_id) {
+    if (payload_size > (size_t)INT_MAX) {
+        log_error("[ipn:%u.%u] handle_deliver_bundle: payload too large", dest_node_id,
+                  dest_service_id);
+        return -EMSGSIZE;
+    }
     struct nl_msg *msg = NULL;
     void *hdr;
     int ret;
@@ -240,7 +246,7 @@ int handle_deliver_bundle(int netlink_family, struct nl_sock *netlink_sock, void
         goto err_free_msg;
     }
 
-    if (nla_put(msg, BP_GENL_A_PAYLOAD, payload_size, payload) < 0) {
+    if (nla_put(msg, BP_GENL_A_PAYLOAD, (int)payload_size, payload) < 0) {
         log_error("[ipn:%u.%u] handle_deliver_bundle: failed to add PAYLOAD attribute",
                   dest_node_id, dest_service_id);
         ret = -EMSGSIZE;
