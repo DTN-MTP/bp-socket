@@ -67,7 +67,7 @@ int genl_bp_sock_recvmsg_cb(struct nl_msg *msg, void *arg) {
     err = nla_parse(attrs, BP_GENL_A_MAX, genlmsg_attrdata(genlhdr, 0), genlmsg_attrlen(genlhdr, 0),
                     NULL);
     if (err < 0) {
-        log_error("Failed to parse Netlink attributes: %s", strerror(-err));
+        log_error("Failed to parse Netlink attributes: %s", nl_geterror(err));
         return NL_SKIP;
     }
 
@@ -76,6 +76,10 @@ int genl_bp_sock_recvmsg_cb(struct nl_msg *msg, void *arg) {
         return handle_send_bundle(daemon, attrs);
     case BP_GENL_CMD_REQUEST_BUNDLE:
         return handle_request_bundle(daemon, attrs);
+    case BP_GENL_CMD_OPEN_ENDPOINT:
+        return handle_open_endpoint(daemon, attrs);
+    case BP_GENL_CMD_CLOSE_ENDPOINT:
+        return handle_close_endpoint(daemon, attrs);
     // case BP_GENL_CMD_DELIVER_BUNDLE:
     //     return handle_deliver_bundle_reply(daemon, attrs);
     case BP_GENL_CMD_DESTROY_BUNDLE:

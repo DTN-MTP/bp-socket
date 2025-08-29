@@ -1,11 +1,175 @@
 #include "ion.h"
-#include "adu_ref.h"
+#include "adu_registry.h"
 #include "log.h"
+#include "nl_utils.h"
+#include "sap_registry.h"
 #include "sdr.h"
 #include <bp.h>
+#include <errno.h>
 #include <pthread.h>
+#include <stdatomic.h>
+#include <stdlib.h>
+#include <string.h>
 
 static pthread_mutex_t sdrmutex = PTHREAD_MUTEX_INITIALIZER;
+Sdr sdr;
+
+static int make_eid(char *buf, size_t bufsize, u_int32_t node_id, u_int32_t service_id) {
+    int n = snprintf(buf, bufsize, "ipn:%u.%u", node_id, service_id);
+    if (n < 0 || n >= (int)bufsize) return -1;
+    return 0;
+}
+
+int ion_open_endpoint(u_int32_t node_id, u_int32_t service_id) {
+    char eid[64];
+    BpSAP sap;
+
+    if (make_eid(eid, sizeof(eid), node_id, service_id) < 0) {
+        log_error("ion_open_endpoint: EID too long");
+        return -EINVAL;
+    }
+
+    if (sap_registry_contains(node_id, service_id)) {
+        return 0; // already open
+    }
+
+    if (bp_open(eid, &sap) < 0) {
+        log_error("ion_open_endpoint: bp_open failed for %s", eid);
+        return -EIO;
+    }
+
+    if (sap_registry_add(node_id, service_id, sap) < 0) {
+        bp_close(sap);
+        return -ENOMEM;
+    }
+    return 0;
+}
+
+int ion_close_endpoint(u_int32_t node_id, u_int32_t service_id) {
+    BpSAP sap = sap_registry_get(node_id, service_id);
+    if (sap) {
+        if (sap_registry_has_active_receive(node_id, service_id)) {
+            log_info("[ipn:%u.%u] CLOSE_ENDPOINT: interrupting active reception", node_id,
+                     service_id);
+            bp_interrupt(sap);
+        } else {
+            log_info("[ipn:%u.%u] CLOSE_ENDPOINT: no active reception, closing directly", node_id,
+                     service_id);
+        }
+
+        bp_close(sap);
+    }
+    sap_registry_remove(node_id, service_id);
+    return 0;
+}
+
+void *ion_send_thread(void *arg) {
+    struct ion_send_args *args = arg;
+    const char *dest_eid = args->dest_eid;
+    const void *payload = args->payload;
+    size_t payload_size = args->payload_size;
+    u_int32_t src_node_id = args->src_node_id;
+    u_int32_t src_service_id = args->src_service_id;
+    BpSAP sap = NULL;
+    Object sdr_buffer = 0;
+    Object adu = 0;
+    int ret = 0;
+
+    if (!dest_eid || !payload || payload_size == 0) {
+        log_error("ion_send_thread: invalid parameters");
+        ret = -EINVAL;
+        goto cleanup_and_notify;
+    }
+
+    sap = sap_registry_get(src_node_id, src_service_id);
+    if (!sap) {
+        log_error("ion_send_thread: no SAP for ipn:%u.%u", src_node_id, src_service_id);
+        ret = -ENODEV;
+        goto cleanup_and_notify;
+    }
+
+    if (pthread_mutex_lock(&sdrmutex) != 0) {
+        log_error("ion_send_thread: sdr mutex lock failed");
+        ret = -EAGAIN;
+        goto cleanup_and_notify;
+    }
+
+    if (sdr_begin_xn(sdr) == 0) {
+        pthread_mutex_unlock(&sdrmutex);
+        log_error("ion_send_thread: sdr_begin_xn failed");
+        ret = -EIO;
+        goto cleanup_and_notify;
+    }
+
+    sdr_buffer = sdr_malloc(sdr, payload_size);
+    if (sdr_buffer == 0) {
+        pthread_mutex_unlock(&sdrmutex);
+        log_error("ion_send_thread: no space for payload");
+        ret = -ENOSPC;
+        goto cleanup_and_notify;
+    }
+
+    sdr_write(sdr, sdr_buffer, (char *)payload, payload_size);
+
+    adu = zco_create(sdr, ZcoSdrSource, sdr_buffer, 0, (vast)payload_size, ZcoOutbound);
+    if (adu <= 0) {
+        pthread_mutex_unlock(&sdrmutex);
+        log_error("ion_send_thread: zco_create failed");
+        ret = -ENOMEM;
+        goto cleanup_and_notify;
+    }
+
+    if (sdr_end_xn(sdr) < 0) {
+        pthread_mutex_unlock(&sdrmutex);
+        log_error("ion_send_thread: sdr_end_xn failed");
+        ret = -EIO;
+        goto cleanup_and_notify;
+    }
+
+    pthread_mutex_unlock(&sdrmutex);
+
+    if (bp_send(sap, (char *)dest_eid, NULL, 86400, BP_STD_PRIORITY, NoCustodyRequested, 0, 0, NULL,
+                adu, NULL) <= 0) {
+        log_error("ion_send_thread: bp_send failed");
+        ret = -EIO;
+        goto cleanup_and_notify;
+    }
+
+    log_info("[ipn:%u.%u] SEND_BUNDLE: bundle sent to EID %s, size %zu (bytes)", args->src_node_id,
+             args->src_service_id, args->dest_eid, args->payload_size);
+
+    if (nl_send_bundle_confirmation(args->netlink_family, args->netlink_sock, args->src_node_id,
+                                    args->src_service_id) < 0) {
+        log_error("[ipn:%u.%u] SEND_BUNDLE: failed to send confirmation to kernel",
+                  args->src_node_id, args->src_service_id);
+    } else {
+        log_info("[ipn:%u.%u] SEND_BUNDLE: confirmation sent to kernel", args->src_node_id,
+                 args->src_service_id);
+    }
+
+    free(args->dest_eid);
+    free(args->payload);
+    free(args);
+    return (void *)(intptr_t)0;
+
+cleanup_and_notify: {
+    int nl_ret = nl_send_bundle_failure(args->netlink_family, args->netlink_sock, args->src_node_id,
+                                        args->src_service_id, ret);
+    if (nl_ret < 0) {
+        log_error(
+            "[ipn:%u.%u] SEND_BUNDLE: failed to send failure notification to kernel (err: %d)",
+            args->src_node_id, args->src_service_id, nl_ret);
+    } else {
+        log_info("[ipn:%u.%u] SEND_BUNDLE: failure notification sent to kernel", args->src_node_id,
+                 args->src_service_id);
+    }
+}
+
+    free(args->dest_eid);
+    free(args->payload);
+    free(args);
+    return (void *)(intptr_t)ret;
+}
 
 const char *bp_result_text(BpIndResult result) {
     switch (result) {
@@ -22,14 +186,14 @@ const char *bp_result_text(BpIndResult result) {
     }
 }
 
-int destroy_bundle(Sdr sdr, Object adu) {
+int ion_destroy_bundle(Object adu) {
     if (pthread_mutex_lock(&sdrmutex) != 0) {
-        log_error("destroy_bundle: Failed to lock SDR mutex.");
+        log_error("ion_destroy_bundle: Failed to lock SDR mutex.");
         return -EAGAIN;
     }
 
     if (sdr_begin_xn(sdr) == 0) {
-        log_error("destroy_bundle: sdr_begin_xn failed.");
+        log_error("ion_destroy_bundle: sdr_begin_xn failed.");
         pthread_mutex_unlock(&sdrmutex);
         return -EIO;
     }
@@ -41,182 +205,190 @@ int destroy_bundle(Sdr sdr, Object adu) {
     return 0;
 }
 
-int bp_send_to_eid(Sdr sdr, void *payload, size_t payload_size, char *dest_eid) {
-    Object sdr_buffer = 0;
-    Object adu;
-    int ret = 0;
+void *ion_receive_thread(void *arg) {
+    struct ion_recv_args *args = arg;
+    const u_int32_t dest_node_id = args->node_id;
+    const u_int32_t dest_service_id = args->service_id;
 
-    if (sdr_begin_xn(sdr) == 0) {
-        log_error("bp_send_to_eid: sdr_begin_xn failed.");
-        return -EIO;
-    }
+    sap_registry_mark_receive_active(dest_node_id, dest_service_id);
 
-    sdr_buffer = sdr_malloc(sdr, payload_size);
-    if (sdr_buffer == 0) {
-        log_error("sdr_malloc failed.");
-        ret = -ENOMEM;
-        goto out;
-    }
-
-    sdr_write(sdr, sdr_buffer, payload, payload_size);
-
-    adu = zco_create(sdr, ZcoSdrSource, sdr_buffer, 0, payload_size, ZcoOutbound);
-    if (adu <= 0) {
-        log_error("zco_create failed.");
-        sdr_free(sdr, sdr_buffer);
-        ret = -ENOMEM;
-        goto out;
-    }
-
-    if (bp_send(NULL, dest_eid, NULL, 86400, BP_STD_PRIORITY, 0, 0, 0, NULL, adu, NULL) <= 0) {
-        log_error("bp_send failed.");
-        sdr_free(sdr, sdr_buffer);
-        ret = -EIO;
-        goto out;
-    }
-
-out:
-    sdr_end_xn(sdr);
-    return ret;
-}
-
-struct reply_bundle bp_recv_once(Sdr sdr, u_int32_t dest_node_id, u_int32_t dest_service_id) {
     BpSAP sap;
     BpDelivery dlv;
     ZcoReader reader;
-    struct adu_reference *adu_ref;
+    adu_node_t *adu_ref;
     u_int32_t own_node_id;
     void *payload = NULL;
-    size_t payload_size;
-    int eid_size;
-    char eid[64];
-    struct reply_bundle reply = {0};
-    u_int32_t src_node_id, src_service_id;
+    size_t payload_size = 0;
+    u_int32_t src_node_id = 0, src_service_id = 0;
+    int err;
 
-    reply.is_present = false;
-    reply.payload = NULL;
-
-    own_node_id = getOwnNodeNbr();
+    {
+        uvast own = getOwnNodeNbr();
+        if (own > (uvast)0xFFFFFFFFu) {
+            log_error("ion_receive_thread: own node ID out of 32-bit range: %llu",
+                      (unsigned long long)own);
+            goto cancel;
+        }
+        own_node_id = (u_int32_t)own;
+    }
     if (dest_node_id != own_node_id) {
-        log_error("bp_recv_once: node ID mismatch. Expected %u, got %u", own_node_id, dest_node_id);
-        goto out;
+        log_error("ion_receive_thread: node ID mismatch. Expected %u, got %u", own_node_id,
+                  dest_node_id);
+        goto cancel;
     }
 
-    adu_ref = find_adu_ref(sdr, dest_node_id, dest_service_id);
+    adu_ref = adu_registry_get(dest_node_id, dest_service_id);
     if (adu_ref != NULL) {
-        payload_size = zco_source_data_length(sdr, adu_ref->adu);
+        if (pthread_mutex_lock(&sdrmutex) != 0) {
+            log_error("ion_receive_thread: Failed to lock SDR mutex.");
+            goto cancel;
+        }
+        if (sdr_begin_xn(sdr) == 0) {
+            log_error("ion_receive_thread: sdr_begin_xn failed.");
+            pthread_mutex_unlock(&sdrmutex);
+            goto cancel;
+        }
+        payload_size = (size_t)zco_source_data_length(sdr, adu_ref->adu);
         payload = malloc(payload_size);
         if (!payload) {
-            log_error("bp_recv_once: Failed to allocate memory for payload.");
-            goto out;
+            log_error("ion_receive_thread: Failed to allocate memory for payload.");
+            sdr_end_xn(sdr);
+            pthread_mutex_unlock(&sdrmutex);
+            goto cancel;
         }
         zco_start_receiving(adu_ref->adu, &reader);
-        if (zco_receive_source(sdr, &reader, payload_size, payload) < 0) {
-            log_error("bp_recv_once: zco_receive_source failed.");
-            goto out;
+        if (zco_receive_source(sdr, &reader, (vast)payload_size, payload) < 0) {
+            log_error("ion_receive_thread: zco_receive_source failed.");
+            free(payload);
+            payload = NULL;
+            sdr_end_xn(sdr);
+            pthread_mutex_unlock(&sdrmutex);
+            goto cancel;
         }
-
         src_node_id = adu_ref->src_node_id;
         src_service_id = adu_ref->src_service_id;
+        sdr_end_xn(sdr);
+        pthread_mutex_unlock(&sdrmutex);
     } else {
-        eid_size = snprintf(eid, sizeof(eid), "ipn:%u.%u", dest_node_id, dest_service_id);
-        if (eid_size < 0 || eid_size >= (int)sizeof(eid)) {
-            log_error("bp_recv_once: failed to construct EID string.");
-            goto out;
+        sap = sap_registry_get(dest_node_id, dest_service_id);
+        if (!sap) {
+            log_error("ion_receive_thread: no SAP for ipn:%u.%u", dest_node_id, dest_service_id);
+            goto cancel;
         }
 
-        if (bp_open(eid, &sap) < 0) {
-            log_error("bp_recv_once: failed to open BpSAP (node_id=%u service_id=%u)", dest_node_id,
-                      dest_service_id);
-            goto out;
-        }
+        while (1) {
+            if (bp_receive(sap, &dlv, BP_BLOCKING) < 0) {
+                log_error("ion_receive_thread: bundle reception failed.");
+                goto cancel;
+            }
 
-        if (bp_receive(sap, &dlv, BP_BLOCKING) < 0) {
-            log_error("bp_recv_once: bundle reception failed.");
-            bp_close(sap);
-            goto out;
-        }
+            if (dlv.result == BpReceptionInterrupted) {
+                if (!sap_registry_contains(dest_node_id, dest_service_id)) {
+                    log_info("ion_receive_thread: endpoint closing, stopping");
+                    bp_release_delivery(&dlv, 0);
+                    goto cancel;
+                }
+                log_info("ion_receive_thread: reception interrupted, continuing to wait");
+                bp_release_delivery(&dlv, 0);
+                continue;
+            }
 
-        if (dlv.result != BpPayloadPresent || dlv.adu == 0) {
-            log_error("bp_recv_once: %s", bp_result_text(dlv.result));
-            bp_release_delivery(&dlv, 0);
-            bp_close(sap);
-            goto out;
-        }
+            if (dlv.adu == 0) {
+                log_info("ion_receive_thread: no ADU, continuing to wait");
+                bp_release_delivery(&dlv, 0);
+                continue;
+            }
 
+            if (dlv.result == BpEndpointStopped) {
+                log_info("ion_receive_thread: endpoint stopped");
+                bp_release_delivery(&dlv, 0);
+                goto cancel;
+            }
+
+            break;
+        }
         if (sscanf(dlv.bundleSourceEid, "ipn:%u.%u", &src_node_id, &src_service_id) != 2) {
-            log_error("bp_recv_once: failed to parse bundleSourceEid: %s", dlv.bundleSourceEid);
+            log_error("ion_receive_thread: failed to parse bundleSourceEid: %s",
+                      dlv.bundleSourceEid);
             bp_release_delivery(&dlv, 0);
-            bp_close(sap);
-            goto out;
+            goto cancel;
         }
-
-        if (add_adu(sdr, dlv.adu, dest_node_id, dest_service_id, src_node_id, src_service_id) < 0) {
-            log_error("bp_recv_once: failed to add bundle reference.");
+        if (adu_registry_add(dlv.adu, dest_node_id, dest_service_id, src_node_id, src_service_id) <
+            0) {
+            log_error("ion_receive_thread: failed to add bundle reference.");
             bp_release_delivery(&dlv, 0);
-            bp_close(sap);
-            goto out;
+            goto cancel;
         }
-
         if (pthread_mutex_lock(&sdrmutex) != 0) {
-            log_error("bp_recv_once: Failed to lock SDR mutex.");
+            log_error("ion_receive_thread: Failed to lock SDR mutex.");
             bp_release_delivery(&dlv, 0);
-            bp_close(sap);
-            goto out;
+            goto cancel;
         }
-
         if (sdr_begin_xn(sdr) == 0) {
-            log_error("bp_recv_once: sdr_begin_xn failed.");
+            log_error("ion_receive_thread: sdr_begin_xn failed.");
             pthread_mutex_unlock(&sdrmutex);
             bp_release_delivery(&dlv, 0);
-            bp_close(sap);
-            goto out;
+            goto cancel;
         }
-
-        payload_size = zco_source_data_length(sdr, dlv.adu);
+        payload_size = (size_t)zco_source_data_length(sdr, dlv.adu);
         payload = malloc(payload_size);
         if (!payload) {
-            log_error("bp_recv_once: Failed to allocate memory for payload.");
+            log_error("ion_receive_thread: Failed to allocate memory for payload.");
             sdr_end_xn(sdr);
             pthread_mutex_unlock(&sdrmutex);
             bp_release_delivery(&dlv, 0);
-            bp_close(sap);
-            goto out;
+            goto cancel;
         }
-
         zco_start_receiving(dlv.adu, &reader);
-        if (zco_receive_source(sdr, &reader, payload_size, payload) < 0) {
-            log_error("bp_recv_once: zco_receive_source failed.");
+        if (zco_receive_source(sdr, &reader, (vast)payload_size, payload) < 0) {
+            log_error("ion_receive_thread: zco_receive_source failed.");
             free(payload);
             payload = NULL;
             sdr_end_xn(sdr);
             pthread_mutex_unlock(&sdrmutex);
             bp_release_delivery(&dlv, 0);
-            bp_close(sap);
-            goto out;
+            goto cancel;
         }
-
         sdr_end_xn(sdr);
         pthread_mutex_unlock(&sdrmutex);
         bp_release_delivery(&dlv, 0);
-        bp_close(sap);
     }
 
-    if (payload == NULL) {
-        log_info("bp_recv_once: no payload received for node_id=%u service_id=%u", dest_node_id,
+    if (!payload) {
+        log_info("ion_receive_thread: no payload received for node_id=%u service_id=%u",
+                 dest_node_id, dest_service_id);
+        goto cancel;
+    }
+
+    err = nl_send_deliver_bundle(args->netlink_family, args->netlink_sock, payload, payload_size,
+                                 src_node_id, src_service_id, dest_node_id, dest_service_id);
+    if (err < 0) {
+        log_error("[ipn:%u.%u] nl_send_deliver_bundle: failed with error %d", dest_node_id,
+                  dest_service_id, err);
+    } else {
+        log_info("[ipn:%u.%u] DELIVER_BUNDLE: bundle sent to kernel", dest_node_id,
                  dest_service_id);
-        goto out;
     }
+    sap_registry_mark_receive_inactive(dest_node_id, dest_service_id);
 
-    reply.is_present = true;
-    reply.payload = payload;
-    reply.payload_size = payload_size;
-    reply.src_node_id = src_node_id;
-    reply.src_service_id = src_service_id;
+    free(payload);
+    free(args);
+    return NULL;
 
-out:
-    if (payload && !reply.is_present) {
-        free(payload);
+cancel:
+    // Mark thread as inactive before cleanup
+    sap_registry_mark_receive_inactive(dest_node_id, dest_service_id);
+
+    err = nl_send_cancel_bundle_request(args->netlink_family, args->netlink_sock, dest_node_id,
+                                        dest_service_id);
+    if (err < 0) {
+        log_error("[ipn:%u.%u] nl_send_cancel_bundle_request failed with error %d", dest_node_id,
+                  dest_service_id, err);
+    } else {
+        log_info("[ipn:%u.%u] CANCEL_BUNDLE_REQUEST: bundle request cancelled", dest_node_id,
+                 dest_service_id);
     }
-    return reply;
+    if (payload) free(payload);
+    free(args);
+    return NULL;
 }

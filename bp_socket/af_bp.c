@@ -30,8 +30,16 @@ static struct sock* bp_alloc_socket(struct net* net, int kern)
 		bp = bp_sk(sk);
 		skb_queue_head_init(&bp->rx_queue);
 		init_waitqueue_head(&bp->rx_waitq);
+		init_waitqueue_head(&bp->tx_waitq);
+
+		mutex_init(&bp->tx_mutex);
+		mutex_init(&bp->rx_mutex);
+
 		bp->bp_node_id = 0;
 		bp->bp_service_id = 0;
+		bp->rx_canceled = false;
+		bp->tx_confirmed = false;
+		bp->tx_error = false;
 	}
 
 	return sk;
@@ -159,6 +167,10 @@ int bp_bind(struct socket* sock, struct sockaddr* uaddr, int addr_len)
 	write_unlock_bh(&bp_list_lock);
 	release_sock(sk);
 
+	// Notify user-space daemon to open endpoint (bp_open) and prepare
+	// threads/state
+	open_endpoint_doit(node_id, service_id, 8443);
+
 	return 0;
 
 out:
@@ -179,6 +191,13 @@ int bp_release(struct socket* sock)
 		sk_del_node_init(sk);
 		write_unlock_bh(&bp_list_lock);
 		skb_queue_purge(&bp->rx_queue);
+
+		// Notify user-space daemon to close endpoint (bp_close) and
+		// cleanup
+		if (bp->bp_node_id && bp->bp_service_id) {
+			close_endpoint_doit(
+			    bp->bp_node_id, bp->bp_service_id, 8443);
+		}
 
 		sock->sk = NULL;
 		release_sock(sk);
@@ -279,6 +298,43 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 			goto err_free;
 		}
 
+		// Wait for confirmation from daemon
+		pr_info("bp_sendmsg: waiting for confirmation for endpoint "
+			"ipn:%u.%u\n",
+		    bp->bp_node_id, bp->bp_service_id);
+
+		// Reset confirmation flag and wait
+		mutex_lock(&bp->tx_mutex);
+		bp->tx_confirmed = false;
+		bp->tx_error = false;
+		mutex_unlock(&bp->tx_mutex);
+
+		ret = wait_event_interruptible(
+		    bp->tx_waitq, bp->tx_confirmed || signal_pending(current));
+
+		if (ret < 0) {
+			pr_err("bp_sendmsg: interrupted while waiting for "
+			       "confirmation\n");
+			goto err_free;
+		}
+
+		mutex_lock(&bp->tx_mutex);
+		if (bp->tx_confirmed) {
+			if (bp->tx_error) {
+				pr_err("bp_sendmsg: bundle send failed for "
+				       "endpoint ipn:%u.%u\n",
+				    bp->bp_node_id, bp->bp_service_id);
+				mutex_unlock(&bp->tx_mutex);
+				ret = -EIO; // Return error to user space
+				goto err_free;
+			} else {
+				pr_info("bp_sendmsg: confirmation received for "
+					"endpoint ipn:%u.%u\n",
+				    bp->bp_node_id, bp->bp_service_id);
+			}
+		}
+		mutex_unlock(&bp->tx_mutex);
+
 		kfree(payload);
 	}
 
@@ -294,7 +350,7 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 {
 	struct sock* sk;
 	struct bp_sock* bp;
-	struct sk_buff* skb;
+	struct sk_buff* skb = NULL;
 	struct sockaddr_bp* src_addr;
 	int ret;
 
@@ -321,11 +377,14 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 		goto out;
 	}
 
+	mutex_lock(&bp->rx_mutex);
 	if (bp->rx_canceled) {
 		pr_info("bp_recvmsg: bundle request canceled\n");
+		mutex_unlock(&bp->rx_mutex);
 		ret = -ECANCELED;
 		goto out;
 	}
+	mutex_unlock(&bp->rx_mutex);
 
 	if (sock_flag(sk, SOCK_DEAD)) {
 		pr_err("bp_recvmsg: socket closed while waiting\n");
@@ -333,13 +392,16 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 		goto out;
 	}
 
+	mutex_lock(&bp->rx_mutex);
 	skb = skb_dequeue(&bp->rx_queue);
 	if (!skb) {
 		pr_info("bp_recvmsg: no messages in the queue for service %d\n",
 		    bp->bp_service_id);
+		mutex_unlock(&bp->rx_mutex);
 		ret = -ENOMSG;
 		goto out;
 	}
+	mutex_unlock(&bp->rx_mutex);
 
 	if (skb->len > size) {
 		pr_err("bp_recvmsg: buffer too small for message (required=%u, "

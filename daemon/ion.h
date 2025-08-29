@@ -4,16 +4,29 @@
 #include "bp.h"
 #include <stdbool.h>
 
-struct reply_bundle {
-    bool is_present;
-    void *payload;
-    size_t payload_size;
-    u_int32_t src_node_id;
-    u_int32_t src_service_id;
+extern Sdr sdr;
+
+struct ion_recv_args {
+    struct nl_sock *netlink_sock;
+    int netlink_family;
+    u_int32_t node_id;
+    u_int32_t service_id;
 };
 
-int destroy_bundle(Sdr sdr, Object adu);
-int bp_send_to_eid(Sdr sdr, void *payload, size_t payload_size, char *dest_eid);
-struct reply_bundle bp_recv_once(Sdr sdr, u_int32_t dest_node_id, u_int32_t dest_service_id);
+struct ion_send_args {
+    struct nl_sock *netlink_sock;
+    int netlink_family;
+    u_int32_t src_node_id;
+    u_int32_t src_service_id;
+    char *dest_eid;
+    void *payload;
+    size_t payload_size;
+};
+
+int ion_open_endpoint(u_int32_t node_id, u_int32_t service_id);
+int ion_close_endpoint(u_int32_t node_id, u_int32_t service_id);
+int ion_destroy_bundle(Object adu);
+void *ion_receive_thread(void *arg);
+void *ion_send_thread(void *arg);
 
 #endif
