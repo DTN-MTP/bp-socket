@@ -7,18 +7,21 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #define BUFFER_SIZE 1024
 #define AF_BP 28 // Custom socket family identifier
 
+volatile int running = 1;
+
 void handle_sigint(int sig) {
   printf("\nInterrupt received, shutting down...\n");
-  exit(1);
+  running = 0;
 }
 
 int main(int argc, char *argv[]) {
-  int sfd;
+  int fd;
   struct sockaddr_bp addr_bp;
   struct msghdr msg;
   struct iovec iov;
@@ -48,12 +51,22 @@ int main(int argc, char *argv[]) {
     return EXIT_FAILURE;
   }
 
-  sfd = socket(AF_BP, SOCK_DGRAM, 1);
-  if (sfd < 0) {
+  fd = socket(AF_BP, SOCK_DGRAM, 1);
+  if (fd < 0) {
     perror("socket creation failed");
     return EXIT_FAILURE;
   }
   printf("Socket created.\n");
+
+  struct timeval tv;
+  tv.tv_sec = 3;
+  tv.tv_usec = 0;
+  if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+    perror("Failed to set receive timeout");
+    ret = EXIT_FAILURE;
+    goto out;
+  }
+  printf("Receive timeout set to 3 seconds.\n");
 
   memset(&addr_bp, 0, sizeof(addr_bp));
   addr_bp.bp_family = AF_BP;
@@ -61,7 +74,7 @@ int main(int argc, char *argv[]) {
   addr_bp.bp_addr.ipn.node_id = node_id;
   addr_bp.bp_addr.ipn.service_id = service_id;
 
-  if (bind(sfd, (struct sockaddr *)&addr_bp, sizeof(addr_bp)) == -1) {
+  if (bind(fd, (struct sockaddr *)&addr_bp, sizeof(addr_bp)) == -1) {
     perror("Failed to bind socket");
     ret = EXIT_FAILURE;
     goto out;
@@ -77,23 +90,45 @@ int main(int argc, char *argv[]) {
   msg.msg_namelen = sizeof(src_addr);
 
   printf("Listening for incoming messages...\n");
-  ssize_t n = recvmsg(sfd, &msg, 0);
-  if (n < 0) {
-    perror("recvmsg failed");
-    ret = EXIT_FAILURE;
-    goto out;
-  }
+  printf("Press Ctrl+C to exit.\n");
 
-  printf("Received message (%zd bytes): %.*s\n", n, (int)n, buffer);
-  if (msg.msg_namelen >= sizeof(struct sockaddr_bp)) {
-    printf("Bundle sent by ipn:%u.%u\n", src_addr.bp_addr.ipn.node_id,
-           src_addr.bp_addr.ipn.service_id);
-  } else {
-    printf("Source address not available\n");
+  while (running) {
+    ssize_t n = recvmsg(fd, &msg, 0);
+    if (n < 0) {
+      if (errno == EINTR) {
+        // Interrupted by signal, exit gracefully
+        printf("\nInterrupted by signal, exiting...\n");
+        break;
+      }
+      if (errno == EAGAIN) {
+        // Timeout occurred
+        printf("Timeout waiting for message, continuing...\n");
+        continue;
+      }
+      perror("recvmsg failed");
+      ret = EXIT_FAILURE;
+      goto out;
+    }
+
+    printf("Received message (%zd bytes): %.*s\n", n, (int)n, buffer);
+    if (msg.msg_namelen >= sizeof(struct sockaddr_bp)) {
+      printf("Bundle sent by ipn:%u.%u\n", src_addr.bp_addr.ipn.node_id,
+             src_addr.bp_addr.ipn.service_id);
+    } else {
+      printf("Source address not available\n");
+    }
+
+    // Reset message structure for next reception
+    memset(&msg, 0, sizeof(msg));
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    memset(&src_addr, 0, sizeof(src_addr));
+    msg.msg_name = &src_addr;
+    msg.msg_namelen = sizeof(src_addr);
   }
 
 out:
-  close(sfd);
+  close(fd);
   printf("Socket closed.\n");
 
   return ret;

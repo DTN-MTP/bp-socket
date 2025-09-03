@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
   src_addr.bp_family = AF_BP;
   src_addr.bp_scheme = BP_SCHEME_IPN;
   src_addr.bp_addr.ipn.node_id = 10;
-  src_addr.bp_addr.ipn.service_id = 1;
+  src_addr.bp_addr.ipn.service_id = 2;
 
   if (bind(fd, (struct sockaddr *)&src_addr, sizeof(src_addr)) == -1) {
     perror("Failed to bind socket");

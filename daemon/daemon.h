@@ -4,9 +4,11 @@
 #include "bp.h"
 #include <event2/event.h>
 #include <netlink/socket.h>
+#include <pthread.h>
 
 typedef struct Daemon {
     struct nl_sock *genl_bp_sock;
+    pthread_mutex_t netlink_mutex;
     const char *genl_bp_family_name;
     int genl_bp_family_id;
     unsigned int nl_pid;

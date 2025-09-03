@@ -1,5 +1,6 @@
 #include "daemon.h"
 #include "bp_genl.h"
+#include "endpoint_registry.h"
 #include "ion.h"
 #include "log.h"
 #include <bp.h>
@@ -72,7 +73,7 @@ int daemon_run(Daemon *self) {
         return ret;
     }
 
-    self->genl_bp_sock = genl_bp_sock_init(self);
+    self->genl_bp_sock = bp_genl_socket_create(self);
     if (!self->genl_bp_sock) {
         log_error("Failed to initialize Generic Netlink socket");
         daemon_free(self);
@@ -102,7 +103,6 @@ int daemon_run(Daemon *self) {
         return ret;
     }
 
-    log_info("Attempting to attach to ION...");
     if (bp_attach() < 0) {
         log_error("Can't attach to BP");
         daemon_free(self);
@@ -124,12 +124,14 @@ int daemon_run(Daemon *self) {
 void daemon_free(Daemon *self) {
     if (!self) return;
 
-    genl_bp_sock_close(self);
+    bp_genl_socket_destroy(self);
 
     if (self->event_on_nl_sock) event_free(self->event_on_nl_sock);
     if (self->event_on_sigpipe) event_free(self->event_on_sigpipe);
     if (self->event_on_sigint) event_free(self->event_on_sigint);
     if (self->base) event_base_free(self->base);
+
+    pthread_mutex_destroy(&self->netlink_mutex);
 
 #if LIBEVENT_VERSION_NUMBER >= 0x02010000
     libevent_global_shutdown();
