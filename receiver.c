@@ -12,9 +12,11 @@
 #define BUFFER_SIZE 1024
 #define AF_BP 28 // Custom socket family identifier
 
+volatile int running = 1;
+
 void handle_sigint(int sig) {
   printf("\nInterrupt received, shutting down...\n");
-  exit(1);
+  running = 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -77,19 +79,36 @@ int main(int argc, char *argv[]) {
   msg.msg_namelen = sizeof(src_addr);
 
   printf("Listening for incoming messages...\n");
-  ssize_t n = recvmsg(sfd, &msg, 0);
-  if (n < 0) {
-    perror("recvmsg failed");
-    ret = EXIT_FAILURE;
-    goto out;
-  }
+  printf("Press Ctrl+C to exit.\n");
 
-  printf("Received message (%zd bytes): %.*s\n", n, (int)n, buffer);
-  if (msg.msg_namelen >= sizeof(struct sockaddr_bp)) {
-    printf("Bundle sent by ipn:%u.%u\n", src_addr.bp_addr.ipn.node_id,
-           src_addr.bp_addr.ipn.service_id);
-  } else {
-    printf("Source address not available\n");
+  while (running) {
+    ssize_t n = recvmsg(sfd, &msg, 0);
+    if (n < 0) {
+      if (errno == EINTR) {
+        // Interrupted by signal, exit gracefully
+        printf("\nInterrupted by signal, exiting...\n");
+        break;
+      }
+      perror("recvmsg failed");
+      ret = EXIT_FAILURE;
+      goto out;
+    }
+
+    printf("Received message (%zd bytes): %.*s\n", n, (int)n, buffer);
+    if (msg.msg_namelen >= sizeof(struct sockaddr_bp)) {
+      printf("Bundle sent by ipn:%u.%u\n", src_addr.bp_addr.ipn.node_id,
+             src_addr.bp_addr.ipn.service_id);
+    } else {
+      printf("Source address not available\n");
+    }
+
+    // Reset message structure for next reception
+    memset(&msg, 0, sizeof(msg));
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+    memset(&src_addr, 0, sizeof(src_addr));
+    msg.msg_name = &src_addr;
+    msg.msg_namelen = sizeof(src_addr);
   }
 
 out:

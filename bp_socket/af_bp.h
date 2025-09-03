@@ -7,6 +7,7 @@
 struct bp_skb_cb {
 	u_int32_t src_node_id;
 	u_int32_t src_service_id;
+	uint64_t adu;
 };
 
 #define bp_sk(ptr) container_of(ptr, struct bp_sock, sk)
@@ -26,13 +27,6 @@ struct bp_sock {
 	struct mutex rx_mutex;
 	struct sk_buff_head rx_queue;
 	wait_queue_head_t rx_waitq;
-	bool rx_canceled;
-
-	// Transmission
-	struct mutex tx_mutex;
-	wait_queue_head_t tx_waitq;
-	bool tx_confirmed;
-	bool tx_error;
 };
 
 int bp_bind(struct socket* sock, struct sockaddr* addr, int addr_len);

@@ -18,6 +18,7 @@ int main(int argc, char *argv[]) {
 
     Daemon daemon = {
         .genl_bp_sock = NULL,
+        .netlink_mutex = PTHREAD_MUTEX_INITIALIZER,
         .genl_bp_family_name = BP_GENL_NAME,
         .genl_bp_family_id = -1,
         .nl_pid = NL_PID,

@@ -1,6 +1,10 @@
+#include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/string.h>
+#include <linux/net.h>
+#include <linux/skbuff.h>
+#include <linux/socket.h>
+#include <linux/types.h>
 #include <net/sock.h>
 
 #include "../include/bp_socket.h"
@@ -30,16 +34,11 @@ static struct sock* bp_alloc_socket(struct net* net, int kern)
 		bp = bp_sk(sk);
 		skb_queue_head_init(&bp->rx_queue);
 		init_waitqueue_head(&bp->rx_waitq);
-		init_waitqueue_head(&bp->tx_waitq);
 
-		mutex_init(&bp->tx_mutex);
 		mutex_init(&bp->rx_mutex);
 
 		bp->bp_node_id = 0;
 		bp->bp_service_id = 0;
-		bp->rx_canceled = false;
-		bp->tx_confirmed = false;
-		bp->tx_error = false;
 	}
 
 	return sk;
@@ -169,7 +168,11 @@ int bp_bind(struct socket* sock, struct sockaddr* uaddr, int addr_len)
 
 	// Notify user-space daemon to open endpoint (bp_open) and prepare
 	// threads/state
-	open_endpoint_doit(node_id, service_id, 8443);
+	ret = open_endpoint_doit(node_id, service_id, 8443);
+	if (ret < 0) {
+		pr_err("bp_bind: open_endpoint_doit failed (%d)\n", ret);
+		goto out;
+	}
 
 	return 0;
 
@@ -298,42 +301,9 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 			goto err_free;
 		}
 
-		// Wait for confirmation from daemon
-		pr_info("bp_sendmsg: waiting for confirmation for endpoint "
-			"ipn:%u.%u\n",
-		    bp->bp_node_id, bp->bp_service_id);
-
-		// Reset confirmation flag and wait
-		mutex_lock(&bp->tx_mutex);
-		bp->tx_confirmed = false;
-		bp->tx_error = false;
-		mutex_unlock(&bp->tx_mutex);
-
-		ret = wait_event_interruptible(
-		    bp->tx_waitq, bp->tx_confirmed || signal_pending(current));
-
-		if (ret < 0) {
-			pr_err("bp_sendmsg: interrupted while waiting for "
-			       "confirmation\n");
-			goto err_free;
-		}
-
-		mutex_lock(&bp->tx_mutex);
-		if (bp->tx_confirmed) {
-			if (bp->tx_error) {
-				pr_err("bp_sendmsg: bundle send failed for "
-				       "endpoint ipn:%u.%u\n",
-				    bp->bp_node_id, bp->bp_service_id);
-				mutex_unlock(&bp->tx_mutex);
-				ret = -EIO; // Return error to user space
-				goto err_free;
-			} else {
-				pr_info("bp_sendmsg: confirmation received for "
-					"endpoint ipn:%u.%u\n",
-				    bp->bp_node_id, bp->bp_service_id);
-			}
-		}
-		mutex_unlock(&bp->tx_mutex);
+		pr_info("bp_sendmsg: bundle sent for endpoint ipn:%u.%u (size: "
+			"%zu)\n",
+		    bp->bp_node_id, bp->bp_service_id, size);
 
 		kfree(payload);
 	}
@@ -364,27 +334,12 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 		goto out;
 	}
 
-	ret = request_bundle_doit(bp->bp_node_id, bp->bp_service_id, 8443);
-	if (ret < 0) {
-		pr_err("bp_recvmsg: request_bundle_doit failed (%d)\n", ret);
-		goto out;
-	}
-
 	ret = wait_event_interruptible(
-	    bp->rx_waitq, !skb_queue_empty(&bp->rx_queue) || bp->rx_canceled);
+	    bp->rx_waitq, !skb_queue_empty(&bp->rx_queue));
 	if (ret < 0) {
 		pr_err("bp_recvmsg: interrupted while waiting\n");
 		goto out;
 	}
-
-	mutex_lock(&bp->rx_mutex);
-	if (bp->rx_canceled) {
-		pr_info("bp_recvmsg: bundle request canceled\n");
-		mutex_unlock(&bp->rx_mutex);
-		ret = -ECANCELED;
-		goto out;
-	}
-	mutex_unlock(&bp->rx_mutex);
 
 	if (sock_flag(sk, SOCK_DEAD)) {
 		pr_err("bp_recvmsg: socket closed while waiting\n");
@@ -427,11 +382,10 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 		goto out;
 	}
 
-	ret = destroy_bundle_doit(bp->bp_node_id, bp->bp_service_id, 8443);
+	ret = destroy_bundle_doit(BP_SKB_CB(skb)->adu, 8443);
 	if (ret < 0) {
-		pr_err(
-		    "destroy_bundle_doit failed (%d), will retry later", ret);
-		// enqueue_retry(bp->bp_node_id, bp->bp_service_id);
+		pr_warn(
+		    "bp_recvmsg: failed to destroy bundle, bundle may leak\n");
 	}
 
 	ret = skb->len;
