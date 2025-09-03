@@ -1,4 +1,5 @@
 #include "ion.h"
+#include "../include/bp_socket.h"
 #include "bp_genl.h"
 #include "endpoint_registry.h"
 #include "log.h"
@@ -113,6 +114,7 @@ void *ion_send_thread(void *arg) {
     struct endpoint_ctx *ctx;
     Object sdr_buffer = 0;
     Object adu = 0;
+    struct bp_send_flags parsed_flags;
     int ret = 0;
 
     if (!dest_eid || !payload || payload_size == 0) {
@@ -174,7 +176,9 @@ void *ion_send_thread(void *arg) {
 
     pthread_mutex_unlock(&sdrmutex);
 
-    if (bp_send(ctx->sap, (char *)dest_eid, NULL, 86400, BP_STD_PRIORITY, NoCustodyRequested, 0, 0,
+    parsed_flags = bp_parse_flags(args->flags);
+    if (bp_send(ctx->sap, (char *)dest_eid, NULL, 86400, parsed_flags.class_of_service,
+                parsed_flags.custody_switch, parsed_flags.srr_flags, parsed_flags.ack_requested,
                 NULL, adu, NULL) <= 0) {
         log_error("ion_send_thread: bp_send failed");
         ret = -EIO;

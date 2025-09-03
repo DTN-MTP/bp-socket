@@ -55,7 +55,14 @@ int main(int argc, char *argv[]) {
   dest_addr.bp_addr.ipn.service_id = service_id;
 
   char *message = "Hello!";
-  ret = sendto(fd, message, strlen(message) + 1, 0,
+  int flags = 0;
+  flags |= MSG_ACK_REQUESTED;
+  // flags |= MSG_RECEIVED_RPT;
+  // flags |= MSG_DELIVERED_RPT;
+  // flags |= MSG_BP_EXPEDITED_PRIORITY;
+  // flags |= MSG_SOURCE_CUSTODY_OPTIONAL;
+
+  ret = sendto(fd, message, strlen(message) + 1, flags,
                (struct sockaddr *)&dest_addr, sizeof(dest_addr));
   if (ret < 0) {
     perror("sendto failed");

@@ -71,13 +71,14 @@ int handle_send_bundle(Daemon *daemon, struct nlattr **attrs) {
     struct ion_send_args *args;
     struct endpoint_ctx *ctx;
     void *payload_copy;
+    u_int32_t flags;
 
     if (!attrs[BP_GENL_A_PAYLOAD] || !attrs[BP_GENL_A_DEST_NODE_ID] ||
         !attrs[BP_GENL_A_DEST_SERVICE_ID] || !attrs[BP_GENL_A_SRC_NODE_ID] ||
-        !attrs[BP_GENL_A_SRC_SERVICE_ID]) {
+        !attrs[BP_GENL_A_SRC_SERVICE_ID] || !attrs[BP_GENL_A_FLAGS]) {
         log_error(
             "handle_send_bundle: missing attribute(s) in SEND_BUNDLE command (payload, node ID, "
-            "service ID)");
+            "service ID, flags)");
         return -EINVAL;
     }
 
@@ -87,6 +88,7 @@ int handle_send_bundle(Daemon *daemon, struct nlattr **attrs) {
     dest_service_id = nla_get_u32(attrs[BP_GENL_A_DEST_SERVICE_ID]);
     src_node_id = nla_get_u32(attrs[BP_GENL_A_SRC_NODE_ID]);
     src_service_id = nla_get_u32(attrs[BP_GENL_A_SRC_SERVICE_ID]);
+    flags = nla_get_u32(attrs[BP_GENL_A_FLAGS]);
 
     written = snprintf(dest_eid, sizeof(dest_eid), "ipn:%u.%u", dest_node_id, dest_service_id);
     if (written < 0 || written >= (int)sizeof(dest_eid)) {
@@ -122,6 +124,7 @@ int handle_send_bundle(Daemon *daemon, struct nlattr **attrs) {
     args->netlink_family = daemon->genl_bp_family_id;
     args->payload = payload_copy;
     args->payload_size = payload_size;
+    args->flags = flags;
 
     if (pthread_create(&thread, NULL, ion_send_thread, args) != 0) {
         log_error("[ipn:%u.%u] handle_send_bundle: failed to create send thread", src_node_id,

@@ -12,6 +12,7 @@ static const struct nla_policy nla_policy[BP_GENL_A_MAX + 1] = {
 	[BP_GENL_A_DEST_SERVICE_ID] = { .type = NLA_U32 },
 	[BP_GENL_A_PAYLOAD] = { .type = NLA_BINARY },
 	[BP_GENL_A_ADU] = { .type = NLA_U64 },
+	[BP_GENL_A_FLAGS] = { .type = NLA_U32 },
 };
 
 static struct genl_ops genl_ops[] = { {
@@ -41,14 +42,14 @@ struct genl_family genl_fam = {
 
 int send_bundle_doit(void* payload, size_t payload_size, u_int32_t dest_node_id,
     u_int32_t dest_service_id, u_int32_t src_node_id, u_int32_t src_service_id,
-    int port_id)
+    u_int32_t flags, int port_id)
 {
 	void* msg_head;
 	struct sk_buff* msg;
 	size_t msg_size;
 	int ret;
 
-	msg_size = 4 * nla_total_size(sizeof(u_int32_t))
+	msg_size = 5 * nla_total_size(sizeof(u_int32_t))
 	    + nla_total_size(payload_size);
 	msg = genlmsg_new(msg_size, GFP_KERNEL);
 	if (!msg) {
@@ -101,6 +102,13 @@ int send_bundle_doit(void* payload, size_t payload_size, u_int32_t dest_node_id,
 	if (ret) {
 		pr_err(
 		    "send_bundle: failed to put BP_GENL_A_PAYLOAD (%d)\n", ret);
+		goto err_cancel;
+	}
+
+	ret = nla_put_u32(msg, BP_GENL_A_FLAGS, flags);
+	if (ret) {
+		pr_err(
+		    "send_bundle: failed to put BP_GENL_A_FLAGS (%d)\n", ret);
 		goto err_cancel;
 	}
 

@@ -299,7 +299,8 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 		}
 
 		ret = send_bundle_doit(payload, size, dest_node_id,
-		    dest_service_id, bp->bp_node_id, bp->bp_service_id, 8443);
+		    dest_service_id, bp->bp_node_id, bp->bp_service_id,
+		    msg->msg_flags, 8443);
 		if (ret < 0) {
 			pr_err(
 			    "bp_sendmsg: send_bundle_doit failed (%d)\n", ret);
