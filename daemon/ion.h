@@ -18,7 +18,8 @@ struct ion_send_args {
     struct nl_sock *netlink_sock;
     pthread_mutex_t *netlink_mutex;
     int netlink_family;
-    struct endpoint_ctx *ctx;
+    u_int32_t node_id;
+    u_int32_t service_id;
     char *dest_eid;
     void *payload;
     size_t payload_size;

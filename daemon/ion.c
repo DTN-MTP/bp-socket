@@ -9,6 +9,7 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static pthread_mutex_t sdrmutex = PTHREAD_MUTEX_INITIALIZER;
 Sdr sdr;
@@ -52,7 +53,6 @@ int ion_open_endpoint(u_int32_t node_id, u_int32_t service_id, struct nl_sock *n
     ctx->service_id = service_id;
     ctx->sap = sap;
     atomic_init(&ctx->running, 1);
-    // __atomic_store_n(&ctx->running, 1, __ATOMIC_RELAXED);
 
     err = endpoint_registry_add(ctx);
     if (err) {
@@ -74,7 +74,7 @@ int ion_open_endpoint(u_int32_t node_id, u_int32_t service_id, struct nl_sock *n
     args->netlink_family = netlink_family;
     args->ctx = ctx;
 
-    if (pthread_create(&ctx->thread, NULL, ion_receive_thread, args) != 0) {
+    if (pthread_create(&ctx->recv_thread, NULL, ion_receive_thread, args) != 0) {
         log_error("ion_open_endpoint: failed to create receive thread: %s", strerror(errno));
         bp_close(sap);
         free(args);
@@ -93,8 +93,9 @@ int ion_close_endpoint(u_int32_t node_id, u_int32_t service_id) {
     }
 
     __atomic_store_n(&ctx->running, 0, __ATOMIC_RELAXED);
-    pthread_join(ctx->thread, NULL);
+
     bp_interrupt(ctx->sap);
+    pthread_join(ctx->recv_thread, NULL);
     bp_close(ctx->sap);
 
     endpoint_registry_remove(node_id, service_id);
@@ -107,7 +108,9 @@ void *ion_send_thread(void *arg) {
     const char *dest_eid = args->dest_eid;
     const void *payload = args->payload;
     size_t payload_size = args->payload_size;
-    struct endpoint_ctx *ctx = args->ctx;
+    u_int32_t node_id = args->node_id;
+    u_int32_t service_id = args->service_id;
+    struct endpoint_ctx *ctx;
     Object sdr_buffer = 0;
     Object adu = 0;
     int ret = 0;
@@ -118,15 +121,15 @@ void *ion_send_thread(void *arg) {
         goto cleanup;
     }
 
-    ctx = endpoint_registry_get(ctx->node_id, ctx->service_id);
+    ctx = endpoint_registry_get(node_id, service_id);
     if (!ctx) {
-        log_error("ion_send_thread: no endpoint for ipn:%u.%u", ctx->node_id, ctx->service_id);
+        log_error("ion_send_thread: no endpoint for ipn:%u.%u", node_id, service_id);
         ret = -ENODEV;
         goto cleanup;
     }
 
     if (!ctx->sap) {
-        log_error("ion_send_thread: invalid SAP for ipn:%u.%u", ctx->node_id, ctx->service_id);
+        log_error("ion_send_thread: invalid SAP for ipn:%u.%u", node_id, service_id);
         ret = -EINVAL;
         goto cleanup;
     }
@@ -178,8 +181,8 @@ void *ion_send_thread(void *arg) {
         goto cleanup;
     }
 
-    log_info("[ipn:%u.%u] SEND_BUNDLE: bundle sent to EID %s, size %zu (bytes)", ctx->node_id,
-             ctx->service_id, args->dest_eid, args->payload_size);
+    log_info("[ipn:%u.%u] SEND_BUNDLE: bundle sent to EID %s, size %zu (bytes)", node_id,
+             service_id, args->dest_eid, args->payload_size);
 
     free(args->dest_eid);
     free(args->payload);

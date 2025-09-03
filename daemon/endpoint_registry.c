@@ -32,7 +32,6 @@ int endpoint_registry_add(struct endpoint_ctx *ctx) {
     endpoint_head = ctx;
     pthread_mutex_unlock(&endpoint_registry_mutex);
 
-    log_info("endpoint_registry_add: added endpoint ipn:%u.%u", ctx->node_id, ctx->service_id);
     return 0;
 }
 

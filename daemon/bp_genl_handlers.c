@@ -114,7 +114,8 @@ int handle_send_bundle(Daemon *daemon, struct nlattr **attrs) {
     // Launch async send thread
     args = malloc(sizeof(struct ion_send_args));
     if (!args) return -ENOMEM;
-    args->ctx = ctx;
+    args->node_id = src_node_id;
+    args->service_id = src_service_id;
     args->dest_eid = strndup(dest_eid, sizeof(dest_eid));
     args->netlink_sock = daemon->genl_bp_sock;
     args->netlink_mutex = &daemon->netlink_mutex;
@@ -130,7 +131,6 @@ int handle_send_bundle(Daemon *daemon, struct nlattr **attrs) {
         free(args);
         return -errno;
     }
-    pthread_detach(thread);
 
     return 0;
 }

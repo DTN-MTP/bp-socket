@@ -91,10 +91,10 @@ int bp_genl_message_handler(struct nl_msg *msg, void *arg) {
     }
 }
 
-int bp_genl_enqueue_bundle(int netlink_family, struct nl_sock *netlink_sock, pthread_mutex_t *netlink_mutex,
-                           void *payload, size_t payload_size, uint32_t src_node_id,
-                           uint32_t src_service_id, uint32_t dest_node_id, uint32_t dest_service_id,
-                           uint64_t adu) {
+int bp_genl_enqueue_bundle(int netlink_family, struct nl_sock *netlink_sock,
+                           pthread_mutex_t *netlink_mutex, void *payload, size_t payload_size,
+                           uint32_t src_node_id, uint32_t src_service_id, uint32_t dest_node_id,
+                           uint32_t dest_service_id, uint64_t adu) {
     if (payload_size > (size_t)INT_MAX) {
         log_error("[ipn:%u.%u] bp_genl_enqueue_bundle: payload too large", dest_node_id,
                   dest_service_id);

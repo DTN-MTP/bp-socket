@@ -12,7 +12,7 @@ struct endpoint_ctx {
     void *sap;
 
     _Atomic int running;
-    pthread_t thread;
+    pthread_t recv_thread;
 
     struct endpoint_ctx *next;
 };
