@@ -34,5 +34,9 @@ int bp_create(struct net* net, struct socket* sock, int protocol, int kern);
 int bp_release(struct socket* sock);
 int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size);
 int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags);
+int bp_setsockopt(struct socket* sock, int level, int optname, sockptr_t optval,
+    unsigned int optlen);
+int bp_getsockopt(struct socket* sock, int level, int optname,
+    char __user* optval, int __user* optlen);
 
 #endif
