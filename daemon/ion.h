@@ -16,15 +16,7 @@ struct ion_recv_args {
 };
 
 struct ion_send_args {
-    struct nl_sock *netlink_sock;
-    pthread_mutex_t *netlink_mutex;
-    int netlink_family;
-    u_int32_t node_id;
-    u_int32_t service_id;
-    char *dest_eid;
-    void *payload;
-    size_t payload_size;
-    u_int32_t flags;
+    struct endpoint_ctx *ctx;
 };
 
 struct bp_send_flags {
