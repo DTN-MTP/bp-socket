@@ -1,4 +1,5 @@
 #include "ion.h"
+#include "../include/bp_socket.h"
 #include "bp_genl.h"
 #include "endpoint_registry.h"
 #include "log.h"
@@ -22,7 +23,8 @@ static int make_eid(char *buf, size_t bufsize, u_int32_t node_id, u_int32_t serv
 
 int ion_open_endpoint(u_int32_t node_id, u_int32_t service_id, struct nl_sock *netlink_sock,
                       pthread_mutex_t *netlink_mutex, int netlink_family) {
-    struct ion_recv_args *args;
+    struct ion_recv_args *recv_args;
+    struct ion_send_args *send_args;
     struct endpoint_ctx *ctx;
     char eid[64];
     BpSAP sap;
@@ -53,31 +55,57 @@ int ion_open_endpoint(u_int32_t node_id, u_int32_t service_id, struct nl_sock *n
     ctx->service_id = service_id;
     ctx->sap = sap;
     atomic_init(&ctx->running, 1);
+    ctx->send_queue_head = NULL;
+    ctx->send_queue_tail = NULL;
+    ctx->send_queue_size = 0;
+    pthread_mutex_init(&ctx->send_queue_mutex, NULL);
+    pthread_cond_init(&ctx->send_queue_cond, NULL);
 
     err = endpoint_registry_add(ctx);
     if (err) {
         __atomic_store_n(&ctx->running, 0, __ATOMIC_RELAXED);
+        pthread_mutex_destroy(&ctx->send_queue_mutex);
+        pthread_cond_destroy(&ctx->send_queue_cond);
         bp_close(sap);
         free(ctx);
         return -ENOMEM;
     }
 
-    args = calloc(1, sizeof(struct ion_recv_args));
-    if (!args) {
-        log_error("ion_open_endpoint: failed to allocate thread args");
+    recv_args = calloc(1, sizeof(struct ion_recv_args));
+    if (!recv_args) {
+        log_error("ion_open_endpoint: failed to allocate receive thread args");
         bp_close(sap);
         free(ctx);
         return -ENOMEM;
     }
-    args->netlink_sock = netlink_sock;
-    args->netlink_mutex = netlink_mutex;
-    args->netlink_family = netlink_family;
-    args->ctx = ctx;
+    recv_args->netlink_sock = netlink_sock;
+    recv_args->netlink_mutex = netlink_mutex;
+    recv_args->netlink_family = netlink_family;
+    recv_args->ctx = ctx;
 
-    if (pthread_create(&ctx->recv_thread, NULL, ion_receive_thread, args) != 0) {
+    if (pthread_create(&ctx->recv_thread, NULL, ion_receive_thread, recv_args) != 0) {
         log_error("ion_open_endpoint: failed to create receive thread: %s", strerror(errno));
         bp_close(sap);
-        free(args);
+        free(recv_args);
+        free(ctx);
+        return -errno;
+    }
+
+    send_args = calloc(1, sizeof(struct ion_send_args));
+    if (!send_args) {
+        log_error("ion_open_endpoint: failed to allocate send thread args");
+        bp_close(sap);
+        free(recv_args);
+        free(ctx);
+        return -ENOMEM;
+    }
+    send_args->ctx = ctx;
+
+    if (pthread_create(&ctx->send_thread, NULL, ion_send_thread, send_args) != 0) {
+        log_error("ion_open_endpoint: failed to create send thread: %s", strerror(errno));
+        bp_close(sap);
+        free(send_args);
+        free(recv_args);
         free(ctx);
         return -errno;
     }
@@ -94,10 +122,30 @@ int ion_close_endpoint(u_int32_t node_id, u_int32_t service_id) {
 
     __atomic_store_n(&ctx->running, 0, __ATOMIC_RELAXED);
 
+    pthread_mutex_lock(&ctx->send_queue_mutex);
+    pthread_cond_broadcast(&ctx->send_queue_cond);
+    pthread_mutex_unlock(&ctx->send_queue_mutex);
     bp_interrupt(ctx->sap);
     pthread_join(ctx->recv_thread, NULL);
-    bp_close(ctx->sap);
+    pthread_join(ctx->send_thread, NULL);
 
+    pthread_mutex_lock(&ctx->send_queue_mutex);
+    struct send_queue_item *item = ctx->send_queue_head;
+    while (item) {
+        struct send_queue_item *next = item->next;
+        free(item->dest_eid);
+        free(item->payload);
+        free(item);
+        item = next;
+    }
+    ctx->send_queue_head = NULL;
+    ctx->send_queue_tail = NULL;
+    ctx->send_queue_size = 0;
+    pthread_mutex_unlock(&ctx->send_queue_mutex);
+    pthread_mutex_destroy(&ctx->send_queue_mutex);
+    pthread_cond_destroy(&ctx->send_queue_cond);
+
+    bp_close(ctx->sap);
     endpoint_registry_remove(node_id, service_id);
 
     return 0;
@@ -105,95 +153,88 @@ int ion_close_endpoint(u_int32_t node_id, u_int32_t service_id) {
 
 void *ion_send_thread(void *arg) {
     struct ion_send_args *args = arg;
-    const char *dest_eid = args->dest_eid;
-    const void *payload = args->payload;
-    size_t payload_size = args->payload_size;
-    u_int32_t node_id = args->node_id;
-    u_int32_t service_id = args->service_id;
-    struct endpoint_ctx *ctx;
+    struct endpoint_ctx *ctx = args->ctx;
+    struct send_queue_item *item;
     Object sdr_buffer = 0;
     Object adu = 0;
-    int ret = 0;
+    struct bp_send_flags parsed_flags;
 
-    if (!dest_eid || !payload || payload_size == 0) {
-        log_error("ion_send_thread: invalid parameters");
-        ret = -EINVAL;
-        goto cleanup;
-    }
+    log_info("ion_send_thread: started for ipn:%u.%u", ctx->node_id, ctx->service_id);
 
-    ctx = endpoint_registry_get(node_id, service_id);
-    if (!ctx) {
-        log_error("ion_send_thread: no endpoint for ipn:%u.%u", node_id, service_id);
-        ret = -ENODEV;
-        goto cleanup;
-    }
+    while (__atomic_load_n(&ctx->running, __ATOMIC_RELAXED)) {
+        pthread_mutex_lock(&ctx->send_queue_mutex);
+        while (ctx->send_queue_head == NULL && __atomic_load_n(&ctx->running, __ATOMIC_RELAXED)) {
+            pthread_cond_wait(&ctx->send_queue_cond, &ctx->send_queue_mutex);
+        }
 
-    if (!ctx->sap) {
-        log_error("ion_send_thread: invalid SAP for ipn:%u.%u", node_id, service_id);
-        ret = -EINVAL;
-        goto cleanup;
-    }
+        if (!__atomic_load_n(&ctx->running, __ATOMIC_RELAXED)) {
+            pthread_mutex_unlock(&ctx->send_queue_mutex);
+            break;
+        }
 
-    if (pthread_mutex_lock(&sdrmutex) != 0) {
-        log_error("ion_send_thread: sdr mutex lock failed");
-        ret = -EAGAIN;
-        goto cleanup;
-    }
+        item = ctx->send_queue_head;
+        ctx->send_queue_head = item->next;
+        if (ctx->send_queue_head == NULL) {
+            ctx->send_queue_tail = NULL;
+        }
+        ctx->send_queue_size--;
+        pthread_mutex_unlock(&ctx->send_queue_mutex);
 
-    if (sdr_begin_xn(sdr) == 0) {
+        if (pthread_mutex_lock(&sdrmutex) != 0) {
+            log_error("ion_send_thread: sdr mutex lock failed");
+            goto cleanup_item;
+        }
+
+        if (sdr_begin_xn(sdr) == 0) {
+            pthread_mutex_unlock(&sdrmutex);
+            log_error("ion_send_thread: sdr_begin_xn failed");
+            goto cleanup_item;
+        }
+
+        sdr_buffer = sdr_malloc(sdr, item->payload_size);
+        if (sdr_buffer == 0) {
+            pthread_mutex_unlock(&sdrmutex);
+            log_error("ion_send_thread: no space for payload");
+            goto cleanup_item;
+        }
+
+        sdr_write(sdr, sdr_buffer, (char *)item->payload, item->payload_size);
+
+        adu = zco_create(sdr, ZcoSdrSource, sdr_buffer, 0, (vast)item->payload_size, ZcoOutbound);
+        if (adu <= 0) {
+            pthread_mutex_unlock(&sdrmutex);
+            log_error("ion_send_thread: zco_create failed");
+            goto cleanup_item;
+        }
+
+        if (sdr_end_xn(sdr) < 0) {
+            pthread_mutex_unlock(&sdrmutex);
+            log_error("ion_send_thread: sdr_end_xn failed");
+            goto cleanup_item;
+        }
+
         pthread_mutex_unlock(&sdrmutex);
-        log_error("ion_send_thread: sdr_begin_xn failed");
-        ret = -EIO;
-        goto cleanup;
+
+        parsed_flags = bp_parse_flags(item->flags);
+        if (bp_send(ctx->sap, (char *)item->dest_eid, NULL, 86400, parsed_flags.class_of_service,
+                    parsed_flags.custody_switch, parsed_flags.srr_flags, parsed_flags.ack_requested,
+                    NULL, adu, NULL) <= 0) {
+            log_error("ion_send_thread: bp_send failed for %s", item->dest_eid);
+            goto cleanup_item;
+        }
+
+        log_info("ion_send_thread: bundle sent to %s (size: %zu)", item->dest_eid,
+                 item->payload_size);
+
+    cleanup_item:
+        free(item->dest_eid);
+        free(item->payload);
+        free(item);
     }
 
-    sdr_buffer = sdr_malloc(sdr, payload_size);
-    if (sdr_buffer == 0) {
-        pthread_mutex_unlock(&sdrmutex);
-        log_error("ion_send_thread: no space for payload");
-        ret = -ENOSPC;
-        goto cleanup;
-    }
-
-    sdr_write(sdr, sdr_buffer, (char *)payload, payload_size);
-
-    adu = zco_create(sdr, ZcoSdrSource, sdr_buffer, 0, (vast)payload_size, ZcoOutbound);
-    if (adu <= 0) {
-        pthread_mutex_unlock(&sdrmutex);
-        log_error("ion_send_thread: zco_create failed");
-        ret = -ENOMEM;
-        goto cleanup;
-    }
-
-    if (sdr_end_xn(sdr) < 0) {
-        pthread_mutex_unlock(&sdrmutex);
-        log_error("ion_send_thread: sdr_end_xn failed");
-        ret = -EIO;
-        goto cleanup;
-    }
-
-    pthread_mutex_unlock(&sdrmutex);
-
-    if (bp_send(ctx->sap, (char *)dest_eid, NULL, 86400, BP_STD_PRIORITY, NoCustodyRequested, 0, 0,
-                NULL, adu, NULL) <= 0) {
-        log_error("ion_send_thread: bp_send failed");
-        ret = -EIO;
-        goto cleanup;
-    }
-
-    log_info("[ipn:%u.%u] SEND_BUNDLE: bundle sent to EID %s, size %zu (bytes)", node_id,
-             service_id, args->dest_eid, args->payload_size);
-
-    free(args->dest_eid);
-    free(args->payload);
+    log_info("ion_send_thread: exiting for ipn:%u.%u", ctx->node_id, ctx->service_id);
     free(args);
-    return (void *)(intptr_t)0;
-
-cleanup:
-    free(args->dest_eid);
-    free(args->payload);
-    free(args);
-    return (void *)(intptr_t)ret;
+    return NULL;
 }
 
 const char *bp_result_text(BpIndResult result) {

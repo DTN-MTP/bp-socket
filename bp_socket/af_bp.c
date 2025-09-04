@@ -285,7 +285,7 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 	}
 
 	if (size > 0) {
-		payload = kmalloc(size, GFP_KERNEL);
+		payload = kmalloc(size, GFP_ATOMIC);
 		if (!payload) {
 			pr_err("bp_sendmsg: failed to allocate memory\n");
 			ret = -ENOMEM;
@@ -299,16 +299,13 @@ int bp_sendmsg(struct socket* sock, struct msghdr* msg, size_t size)
 		}
 
 		ret = send_bundle_doit(payload, size, dest_node_id,
-		    dest_service_id, bp->bp_node_id, bp->bp_service_id, 8443);
+		    dest_service_id, bp->bp_node_id, bp->bp_service_id,
+		    msg->msg_flags, 8443);
 		if (ret < 0) {
 			pr_err(
 			    "bp_sendmsg: send_bundle_doit failed (%d)\n", ret);
 			goto err_free;
 		}
-
-		pr_info("bp_sendmsg: bundle sent for endpoint ipn:%u.%u (size: "
-			"%zu)\n",
-		    bp->bp_node_id, bp->bp_service_id, size);
 
 		kfree(payload);
 	}

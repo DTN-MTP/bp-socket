@@ -59,6 +59,7 @@ demo-app-bp-recv
 .vagrant
 sender
 receiver
+bp_client
 tests/sender
 tests/receiver
 daemon/bp_daemon
