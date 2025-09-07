@@ -368,8 +368,8 @@ void *ion_receive_thread(void *arg) {
         bp_release_delivery(&dlv, 0);
 
         if (!payload) {
-            log_info("ion_receive_thread: no payload received for node_id=%u service_id=%u",
-                     dest_node_id, dest_service_id);
+            log_debug("ion_receive_thread: no payload received for node_id=%u service_id=%u",
+                      dest_node_id, dest_service_id);
             continue;
         }
 
@@ -380,8 +380,8 @@ void *ion_receive_thread(void *arg) {
             log_error("[ipn:%u.%u] bp_genl_enqueue_bundle: failed with error %d", dest_node_id,
                       dest_service_id, err);
         } else {
-            log_info("[ipn:%u.%u] ENQUEUE_BUNDLE: incoming bundle queued in the kernel (adu: %llu)",
-                     dest_node_id, dest_service_id, (unsigned long long)dlv.adu);
+            log_info("[ipn:%u.%u] Inbound bundle: source=ipn:%u.%u, payload_size=%zu bytes",
+                     ctx->node_id, ctx->service_id, src_node_id, src_service_id, payload_size);
         }
 
         free(payload);

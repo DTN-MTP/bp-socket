@@ -72,7 +72,8 @@ int bp_genl_message_handler(struct nl_msg *msg, void *arg) {
     err = nla_parse(attrs, BP_GENL_A_MAX, genlmsg_attrdata(genlhdr, 0), genlmsg_attrlen(genlhdr, 0),
                     NULL);
     if (err < 0) {
-        log_error("Failed to parse Netlink attributes: %s", nl_geterror(err));
+        log_error("bp_genl_handle_msg: failed to parse Netlink attributes for cmd %d: %s",
+                  genlhdr->cmd, nl_geterror(err));
         return NL_SKIP;
     }
 
@@ -86,7 +87,7 @@ int bp_genl_message_handler(struct nl_msg *msg, void *arg) {
     case BP_GENL_CMD_DESTROY_BUNDLE:
         return handle_destroy_bundle(daemon, attrs);
     default:
-        log_error("Unknown Generic Netlink command: %d", genlhdr->cmd);
+        log_error("bp_genl_handle_msg: unknown Generic Netlink command: %d", genlhdr->cmd);
         return NL_SKIP;
     }
 }

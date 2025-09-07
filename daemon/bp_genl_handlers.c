@@ -30,10 +30,10 @@ int handle_open_endpoint(Daemon *daemon, struct nlattr **attrs) {
     ret = ion_open_endpoint(node_id, service_id, daemon->genl_bp_sock, &daemon->netlink_mutex,
                             daemon->genl_bp_family_id);
     if (ret == 0) {
-        log_info("[ipn:%u.%u] Endpoint opened: starting receive and send worker threads", node_id,
+        log_info("[ipn:%u.%u] Endpoint opened: spawning receiver and sender threads", node_id,
                  service_id);
     } else {
-        log_error("[ipn:%u.%u] OPEN_ENDPOINT: failed to open endpoint (error %d)", node_id,
+        log_error("handle_open_endpoint: failed to open endpoint ipn:%u.%u (error %d)", node_id,
                   service_id, ret);
     }
     return ret;
@@ -52,10 +52,9 @@ int handle_close_endpoint(Daemon *daemon, struct nlattr **attrs) {
 
     int ret = ion_close_endpoint(node_id, service_id);
     if (ret == 0) {
-        log_info("[ipn:%u.%u] Endpoint closed: gracefully stopping receive and send threads",
-                 node_id, service_id);
+        log_info("[ipn:%u.%u] Endpoint closed gracefully", node_id, service_id);
     } else {
-        log_error("[ipn:%u.%u] CLOSE_ENDPOINT: failed to close endpoint (error %d)", node_id,
+        log_error("handle_close_endpoint: failed to close endpoint ipn:%u.%u (error %d)", node_id,
                   service_id, ret);
     }
 
@@ -91,7 +90,7 @@ int handle_send_bundle(Daemon *daemon, struct nlattr **attrs) {
 
     written = snprintf(dest_eid, sizeof(dest_eid), "ipn:%u.%u", dest_node_id, dest_service_id);
     if (written < 0 || written >= (int)sizeof(dest_eid)) {
-        log_error("[ipn:%u.%u] handle_send_bundle: failed to construct EID string", src_node_id,
+        log_error("handle_send_bundle: failed to construct EID string for ipn:%u.%u", src_node_id,
                   src_service_id);
         return -EINVAL;
     }
@@ -99,8 +98,8 @@ int handle_send_bundle(Daemon *daemon, struct nlattr **attrs) {
     ret = endpoint_registry_enqueue_send(src_node_id, src_service_id, dest_eid, payload,
                                          payload_size, flags);
     if (ret < 0) {
-        log_error("[ipn:%u.%u] handle_send_bundle: failed to enqueue send (error: %d)", src_node_id,
-                  src_service_id, ret);
+        log_error("handle_send_bundle: failed to enqueue send for ipn:%u.%u (error: %d)",
+                  src_node_id, src_service_id, ret);
         return ret;
     }
 
@@ -125,7 +124,7 @@ int handle_destroy_bundle(Daemon *daemon, struct nlattr **attrs) {
         return ret;
     }
 
-    log_info("DESTROY_BUNDLE: bundle consumed by a socket (adu: %llu)", (unsigned long long)adu);
+    log_info("Bundle consumed: successfully destroyed ADU %llu", (unsigned long long)adu);
 
     return 0;
 }
