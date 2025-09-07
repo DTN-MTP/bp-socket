@@ -159,15 +159,13 @@ void *ion_send_thread(void *arg) {
     Object adu = 0;
     struct bp_send_flags parsed_flags;
 
-    log_info("ion_send_thread: started for ipn:%u.%u", ctx->node_id, ctx->service_id);
-
-    while (__atomic_load_n(&ctx->running, __ATOMIC_RELAXED)) {
+    while (true) {
         pthread_mutex_lock(&ctx->send_queue_mutex);
         while (ctx->send_queue_head == NULL && __atomic_load_n(&ctx->running, __ATOMIC_RELAXED)) {
             pthread_cond_wait(&ctx->send_queue_cond, &ctx->send_queue_mutex);
         }
 
-        if (!__atomic_load_n(&ctx->running, __ATOMIC_RELAXED)) {
+        if (ctx->send_queue_head == NULL && !__atomic_load_n(&ctx->running, __ATOMIC_RELAXED)) {
             pthread_mutex_unlock(&ctx->send_queue_mutex);
             break;
         }
@@ -223,8 +221,9 @@ void *ion_send_thread(void *arg) {
             goto cleanup_item;
         }
 
-        log_info("ion_send_thread: bundle sent to %s (size: %zu)", item->dest_eid,
-                 item->payload_size);
+        log_info("[ipn:%u.%u] Outbound bundle: destination=%s, payload_size=%zu bytes, "
+                 "flags=0x%08x",
+                 ctx->node_id, ctx->service_id, item->dest_eid, item->payload_size, item->flags);
 
     cleanup_item:
         free(item->dest_eid);
@@ -232,7 +231,6 @@ void *ion_send_thread(void *arg) {
         free(item);
     }
 
-    log_info("ion_send_thread: exiting for ipn:%u.%u", ctx->node_id, ctx->service_id);
     free(args);
     return NULL;
 }

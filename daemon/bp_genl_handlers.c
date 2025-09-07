@@ -30,7 +30,8 @@ int handle_open_endpoint(Daemon *daemon, struct nlattr **attrs) {
     ret = ion_open_endpoint(node_id, service_id, daemon->genl_bp_sock, &daemon->netlink_mutex,
                             daemon->genl_bp_family_id);
     if (ret == 0) {
-        log_info("[ipn:%u.%u] OPEN_ENDPOINT: endpoint opened successfully", node_id, service_id);
+        log_info("[ipn:%u.%u] Endpoint opened: starting receive and send worker threads", node_id,
+                 service_id);
     } else {
         log_error("[ipn:%u.%u] OPEN_ENDPOINT: failed to open endpoint (error %d)", node_id,
                   service_id, ret);
@@ -51,7 +52,8 @@ int handle_close_endpoint(Daemon *daemon, struct nlattr **attrs) {
 
     int ret = ion_close_endpoint(node_id, service_id);
     if (ret == 0) {
-        log_info("[ipn:%u.%u] CLOSE_ENDPOINT: closing endpoint", node_id, service_id);
+        log_info("[ipn:%u.%u] Endpoint closed: gracefully stopping receive and send threads",
+                 node_id, service_id);
     } else {
         log_error("[ipn:%u.%u] CLOSE_ENDPOINT: failed to close endpoint (error %d)", node_id,
                   service_id, ret);
@@ -101,9 +103,6 @@ int handle_send_bundle(Daemon *daemon, struct nlattr **attrs) {
                   src_service_id, ret);
         return ret;
     }
-
-    log_info("[ipn:%u.%u] SEND_BUNDLE: bundle queued for sending to EID %s, size %zu (bytes)",
-             src_node_id, src_service_id, dest_eid, payload_size);
 
     return 0;
 }

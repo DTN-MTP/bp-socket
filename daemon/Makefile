@@ -11,7 +11,7 @@ OBJECTS := $(SOURCES:.c=.o)
 
 SRC_FILES := $(wildcard *.c *.h)
 
-.PHONY: all release clean format
+.PHONY: all release clean format install
 
 all: $(EXEC)
 
@@ -29,3 +29,9 @@ clean:
 
 format:
 	clang-format -i --style=file $(SRC_FILES)
+
+install: $(EXEC)
+	@echo "Installing daemon..."
+	install -d /usr/local/bin
+	install -m 755 $(EXEC) /usr/local/bin/
+	@echo "Daemon installed successfully!"

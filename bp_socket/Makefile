@@ -6,7 +6,7 @@ PWD := $(shell pwd)
 
 SRC_FILES := $(wildcard *.c *.h)
 
-.PHONY: all clean sparse
+.PHONY: all clean sparse install
 
 all:
 	$(MAKE) -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
@@ -19,3 +19,10 @@ sparse:
 
 format:
 	clang-format -i --style=file $(SRC_FILES)
+
+install: all
+	@echo "Installing kernel module..."
+	install -d /lib/modules/$(shell uname -r)/extra
+	install -m 644 bp.ko /lib/modules/$(shell uname -r)/extra/
+	depmod -a
+	@echo "Kernel module installed. Use 'modprobe bp' to load it."
