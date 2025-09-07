@@ -159,15 +159,13 @@ void *ion_send_thread(void *arg) {
     Object adu = 0;
     struct bp_send_flags parsed_flags;
 
-    log_info("ion_send_thread: started for ipn:%u.%u", ctx->node_id, ctx->service_id);
-
-    while (__atomic_load_n(&ctx->running, __ATOMIC_RELAXED)) {
+    while (true) {
         pthread_mutex_lock(&ctx->send_queue_mutex);
         while (ctx->send_queue_head == NULL && __atomic_load_n(&ctx->running, __ATOMIC_RELAXED)) {
             pthread_cond_wait(&ctx->send_queue_cond, &ctx->send_queue_mutex);
         }
 
-        if (!__atomic_load_n(&ctx->running, __ATOMIC_RELAXED)) {
+        if (ctx->send_queue_head == NULL && !__atomic_load_n(&ctx->running, __ATOMIC_RELAXED)) {
             pthread_mutex_unlock(&ctx->send_queue_mutex);
             break;
         }
@@ -194,7 +192,8 @@ void *ion_send_thread(void *arg) {
         sdr_buffer = sdr_malloc(sdr, item->payload_size);
         if (sdr_buffer == 0) {
             pthread_mutex_unlock(&sdrmutex);
-            log_error("ion_send_thread: no space for payload");
+            log_error("ion_send_thread: no space for payload (size: %zu) - ION SDR full",
+                      item->payload_size);
             goto cleanup_item;
         }
 
@@ -223,8 +222,9 @@ void *ion_send_thread(void *arg) {
             goto cleanup_item;
         }
 
-        log_info("ion_send_thread: bundle sent to %s (size: %zu)", item->dest_eid,
-                 item->payload_size);
+        log_info("[ipn:%u.%u] Outbound bundle: destination=%s, payload_size=%zu bytes, "
+                 "flags=0x%08x",
+                 ctx->node_id, ctx->service_id, item->dest_eid, item->payload_size, item->flags);
 
     cleanup_item:
         free(item->dest_eid);
@@ -232,7 +232,6 @@ void *ion_send_thread(void *arg) {
         free(item);
     }
 
-    log_info("ion_send_thread: exiting for ipn:%u.%u", ctx->node_id, ctx->service_id);
     free(args);
     return NULL;
 }
@@ -370,8 +369,8 @@ void *ion_receive_thread(void *arg) {
         bp_release_delivery(&dlv, 0);
 
         if (!payload) {
-            log_info("ion_receive_thread: no payload received for node_id=%u service_id=%u",
-                     dest_node_id, dest_service_id);
+            log_debug("ion_receive_thread: no payload received for node_id=%u service_id=%u",
+                      dest_node_id, dest_service_id);
             continue;
         }
 
@@ -382,8 +381,8 @@ void *ion_receive_thread(void *arg) {
             log_error("[ipn:%u.%u] bp_genl_enqueue_bundle: failed with error %d", dest_node_id,
                       dest_service_id, err);
         } else {
-            log_info("[ipn:%u.%u] ENQUEUE_BUNDLE: incoming bundle queued in the kernel (adu: %llu)",
-                     dest_node_id, dest_service_id, (unsigned long long)dlv.adu);
+            log_info("[ipn:%u.%u] Inbound bundle: source=ipn:%u.%u, payload_size=%zu bytes",
+                     ctx->node_id, ctx->service_id, src_node_id, src_service_id, payload_size);
         }
 
         free(payload);

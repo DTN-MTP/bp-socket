@@ -1,4 +1,4 @@
-#include "include/bp_socket.h"
+#include "bp_socket.h"
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
@@ -40,7 +40,8 @@ void *send_thread(void *arg) {
              message_count);
 
     int flags = 0;
-    flags |= MSG_ACK_REQUESTED;
+    // flags |= MSG_ACK_REQUESTED;
+    flags |= MSG_NO_CUSTODY_REQUIRED;
 
     int ret =
         sendto(data->fd, send_buffer, strlen(send_buffer) + 1, flags,

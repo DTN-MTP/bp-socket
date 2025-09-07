@@ -150,9 +150,10 @@ int endpoint_registry_enqueue_send(uint32_t node_id, uint32_t service_id, const 
 
     pthread_mutex_lock(&ctx->send_queue_mutex);
 
-    if (ctx->send_queue_size >= 1000) { // Limite de queue
+    if (ctx->send_queue_size >= 5000) {
         pthread_mutex_unlock(&ctx->send_queue_mutex);
-        log_warn("endpoint_registry_enqueue_send: queue full for ipn:%u.%u", node_id, service_id);
+        log_warn("endpoint_registry_enqueue_send: queue full for ipn:%u.%u (size: %d)", node_id,
+                 service_id, ctx->send_queue_size);
         free(item->dest_eid);
         free(item->payload);
         free(item);

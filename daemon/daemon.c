@@ -44,8 +44,8 @@ int daemon_run(Daemon *self) {
         log_error("Failed to create libevent base");
         return -ENOMEM;
     }
-    log_info("Using libevent version %s with %s behind the scenes", (char *)event_get_version(),
-             (char *)event_base_get_method(self->base));
+    log_debug("Using libevent version %s with %s behind the scenes", (char *)event_get_version(),
+              (char *)event_base_get_method(self->base));
 
     self->event_on_sigint = evsignal_new(self->base, SIGINT, on_sigint, self->base);
     if (!self->event_on_sigint) {
@@ -79,8 +79,6 @@ int daemon_run(Daemon *self) {
         daemon_free(self);
         return -ENOMEM;
     }
-    log_info("Generic Netlink: GENL_BP open socket");
-
     fd = nl_socket_get_fd(self->genl_bp_sock);
     self->event_on_nl_sock = event_new(self->base, fd, EV_READ | EV_PERSIST, on_netlink, self);
     if (!self->event_on_nl_sock) {
@@ -109,9 +107,8 @@ int daemon_run(Daemon *self) {
         return -EAGAIN;
     }
     sdr = bp_get_sdr();
-    log_info("Successfully attached to ION");
 
-    log_info("Daemon started successfully");
+    log_info("Daemon started successfully - attached to ION, Netlink ready");
     event_base_dispatch(self->base);
     log_info("Daemon terminated");
 
@@ -124,13 +121,12 @@ int daemon_run(Daemon *self) {
 void daemon_free(Daemon *self) {
     if (!self) return;
 
-    bp_genl_socket_destroy(self);
-
     if (self->event_on_nl_sock) event_free(self->event_on_nl_sock);
     if (self->event_on_sigpipe) event_free(self->event_on_sigpipe);
     if (self->event_on_sigint) event_free(self->event_on_sigint);
     if (self->base) event_base_free(self->base);
 
+    bp_genl_socket_destroy(self);
     pthread_mutex_destroy(&self->netlink_mutex);
 
 #if LIBEVENT_VERSION_NUMBER >= 0x02010000

@@ -24,7 +24,7 @@ Vagrant.configure("2") do |config|
     EOF
     ion.vm.provision "shell", inline: <<-EOF
     export DEBIAN_FRONTEND=noninteractive
-    apt install -y curl git ca-certificates make pkg-config libnl-genl-3-dev libevent-dev build-essential linux-headers-$(uname -r)
+    apt install -y curl git ca-certificates make pkg-config libnl-genl-3-dev libnl-3-dev libevent-dev build-essential clang-format sparse linux-headers-$(uname -r)
 
     cd /opt
     wget -q https://github.com/nasa-jpl/ION-DTN/archive/refs/tags/ion-open-source-4.1.3.tar.gz
