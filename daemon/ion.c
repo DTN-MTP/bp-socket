@@ -192,7 +192,8 @@ void *ion_send_thread(void *arg) {
         sdr_buffer = sdr_malloc(sdr, item->payload_size);
         if (sdr_buffer == 0) {
             pthread_mutex_unlock(&sdrmutex);
-            log_error("ion_send_thread: no space for payload");
+            log_error("ion_send_thread: no space for payload (size: %zu) - ION SDR full",
+                      item->payload_size);
             goto cleanup_item;
         }
 

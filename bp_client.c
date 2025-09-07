@@ -40,7 +40,8 @@ void *send_thread(void *arg) {
              message_count);
 
     int flags = 0;
-    flags |= MSG_ACK_REQUESTED;
+    // flags |= MSG_ACK_REQUESTED;
+    flags |= MSG_NO_CUSTODY_REQUIRED;
 
     int ret =
         sendto(data->fd, send_buffer, strlen(send_buffer) + 1, flags,
