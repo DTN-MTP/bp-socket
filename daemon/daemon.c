@@ -121,13 +121,12 @@ int daemon_run(Daemon *self) {
 void daemon_free(Daemon *self) {
     if (!self) return;
 
-    bp_genl_socket_destroy(self);
-
     if (self->event_on_nl_sock) event_free(self->event_on_nl_sock);
     if (self->event_on_sigpipe) event_free(self->event_on_sigpipe);
     if (self->event_on_sigint) event_free(self->event_on_sigint);
     if (self->base) event_base_free(self->base);
 
+    bp_genl_socket_destroy(self);
     pthread_mutex_destroy(&self->netlink_mutex);
 
 #if LIBEVENT_VERSION_NUMBER >= 0x02010000
