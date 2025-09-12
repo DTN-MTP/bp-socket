@@ -65,7 +65,7 @@ struct proto_ops bp_proto_ops = { .family = AF_BP,
 	.mmap = sock_no_mmap,
 	.accept = sock_no_accept,
 	.getname = sock_no_getname,
-	// .poll = bp_poll,
+	.poll = bp_poll,
 	.ioctl = sock_no_ioctl,
 	.listen = sock_no_listen,
 	.shutdown = sock_no_shutdown,
@@ -316,6 +316,33 @@ err_free:
 	kfree(payload);
 out:
 	return ret;
+}
+
+__poll_t bp_poll(
+    struct file* file, struct socket* sock, struct poll_table_struct* wait)
+{
+	struct sock* sk = sock->sk;
+	struct bp_sock* bp = bp_sk(sk);
+	__poll_t mask = 0;
+
+	sock_poll_wait(file, sock, wait);
+
+	if (sk->sk_err)
+		mask |= POLLERR;
+
+	if (sk->sk_shutdown & RCV_SHUTDOWN)
+		mask |= POLLRDHUP | POLLIN | POLLRDNORM;
+
+	if (sk->sk_shutdown == SHUTDOWN_MASK)
+		mask |= POLLHUP;
+
+	if (!skb_queue_empty(&bp->rx_queue))
+		mask |= POLLIN | POLLRDNORM;
+
+	if (sock_writeable(sk))
+		mask |= POLLOUT | POLLWRNORM;
+
+	return mask;
 }
 
 int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)

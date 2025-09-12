@@ -38,5 +38,7 @@ int bp_setsockopt(struct socket* sock, int level, int optname, sockptr_t optval,
     unsigned int optlen);
 int bp_getsockopt(struct socket* sock, int level, int optname,
     char __user* optval, int __user* optlen);
+__poll_t bp_poll(
+    struct file* file, struct socket* sock, struct poll_table_struct* wait);
 
 #endif
