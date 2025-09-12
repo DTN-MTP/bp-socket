@@ -325,6 +325,7 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 	struct sk_buff* skb = NULL;
 	struct sockaddr_bp* src_addr;
 	long timeo;
+	size_t copy_len;
 	int ret;
 
 	sk = sock->sk;
@@ -358,7 +359,11 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 	}
 
 	mutex_lock(&bp->rx_mutex);
-	skb = skb_dequeue(&bp->rx_queue);
+	if (flags & MSG_PEEK) {
+		skb = skb_peek(&bp->rx_queue);
+	} else {
+		skb = skb_dequeue(&bp->rx_queue);
+	}
 	if (!skb) {
 		pr_info("bp_recvmsg: no messages in the queue for ipn:%u.%u\n",
 		    bp->bp_node_id, bp->bp_service_id);
@@ -369,11 +374,16 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 	mutex_unlock(&bp->rx_mutex);
 
 	if (skb->len > size) {
-		pr_err("bp_recvmsg: buffer too small for message (required=%u, "
-		       "provided=%zu)\n",
-		    skb->len, size);
-		ret = -EMSGSIZE;
-		goto out;
+		if (flags & MSG_TRUNC) {
+			msg->msg_flags |= MSG_TRUNC;
+		} else {
+			pr_err("bp_recvmsg: buffer too small for message "
+			       "(required=%u, "
+			       "provided=%zu)\n",
+			    skb->len, size);
+			ret = -EMSGSIZE;
+			goto out;
+		}
 	}
 
 	if (msg->msg_name) {
@@ -386,22 +396,25 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 		msg->msg_namelen = sizeof(struct sockaddr_bp);
 	}
 
-	if (copy_to_iter(skb->data, skb->len, &msg->msg_iter) != skb->len) {
+	copy_len = (skb->len > size) ? size : skb->len;
+	if (copy_to_iter(skb->data, copy_len, &msg->msg_iter) != copy_len) {
 		pr_err("bp_recvmsg: failed to copy data to user space\n");
 		ret = -EFAULT;
 		goto out;
 	}
 
-	ret = destroy_bundle_doit(BP_SKB_CB(skb)->adu, 8443);
-	if (ret < 0) {
-		pr_warn(
-		    "bp_recvmsg: failed to destroy bundle, bundle may leak\n");
+	if (!(flags & MSG_PEEK)) {
+		ret = destroy_bundle_doit(BP_SKB_CB(skb)->adu, 8443);
+		if (ret < 0) {
+			pr_warn("bp_recvmsg: failed to destroy bundle, bundle "
+				"may leak\n");
+		}
 	}
 
 	ret = skb->len;
 
 out:
-	if (skb)
+	if (skb && !(flags & MSG_PEEK))
 		kfree_skb(skb);
 	release_sock(sk);
 	return ret;
