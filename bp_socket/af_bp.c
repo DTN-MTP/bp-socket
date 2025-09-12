@@ -411,7 +411,7 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 		}
 	}
 
-	ret = copy_len;
+	ret = skb->len;
 
 out:
 	if (skb && !(flags & MSG_PEEK))
