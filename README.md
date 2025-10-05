@@ -132,6 +132,7 @@ multipass launch 24.04 \
   --mount $PWD:/bp-socket \
   --network name=en0,mode=manual,mac="52:54:00:4b:ab:cd" \
   --cloud-init configs/cloud-init/ion.cloud-config.cfg
+multipass exec ion-node -- bash -c "echo `cat ~/.ssh/id_rsa.pub` >> ~/.ssh/authorized_keys"
 ```
 
 This command:
@@ -216,10 +217,10 @@ ionstart -I ./host.rc
 # b) Build project
 cd /bp-socket/
 make
+make install
 
-# c) Insert the bp.ko file and run the userspace daemon:
-insmod /bp-socket/bp_socket/bp.ko
-/bp-socket/daemon/bp_daemon
+docker build -t bp-daemon:latest -f daemon/Dockerfile .
+docker run --ipc=host --net=host --cap-add=NET_ADMIN -d bp-daemon:latest
 ```
 
 </details>
