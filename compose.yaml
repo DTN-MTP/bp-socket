@@ -1,0 +1,13 @@
+services:
+  bp-daemon:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: daemon/Dockerfile
+    image: bp-daemon:latest
+    container_name: bp-daemon
+    network_mode: host
+    ipc: host
+    cap_add:
+      - NET_ADMIN
+    command: ["/usr/local/bin/bp_daemon"]
