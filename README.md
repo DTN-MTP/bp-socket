@@ -212,15 +212,12 @@ sudo -i
 # a) Start ION
 cd /bp-socket/configs
 export LD_LIBRARY_PATH="/usr/local/lib"
-ionstart -I ./host.rc
+ionstart -I ./host<10|20>.rc
 
-# b) Build project
+# b) Run bp-socket
 cd /bp-socket/
-make
 make install
-
-docker build -t bp-daemon:latest -f daemon/Dockerfile .
-docker run --ipc=host --net=host --cap-add=NET_ADMIN -d bp-daemon:latest
+docker compose up -d
 ```
 
 </details>
