@@ -202,14 +202,17 @@ out:
 	return ret;
 }
 
-int destroy_bundle_doit(uint64_t adu, int port_id)
+int destroy_bundle_doit(
+    uint64_t adu, u_int32_t node_id, u_int32_t service_id, int port_id)
 {
 	void* msg_head;
 	struct sk_buff* msg;
 	size_t msg_size;
 	int ret;
 
-	msg_size = nla_total_size(sizeof(uint64_t));
+	msg_size = nla_total_size(sizeof(uint64_t))
+	    + nla_total_size(sizeof(u_int32_t))
+	    + nla_total_size(sizeof(u_int32_t));
 	msg = genlmsg_new(msg_size, GFP_KERNEL);
 	if (!msg) {
 		pr_err("destroy_bundle: failed to allocate message buffer\n");
@@ -229,6 +232,22 @@ int destroy_bundle_doit(uint64_t adu, int port_id)
 	if (ret) {
 		pr_err(
 		    "destroy_bundle: failed to put BP_GENL_A_ADU (%d)\n", ret);
+		goto err_cancel;
+	}
+
+	ret = nla_put_u32(msg, BP_GENL_A_DEST_NODE_ID, node_id);
+	if (ret) {
+		pr_err("destroy_bundle: failed to put BP_GENL_A_DEST_NODE_ID "
+		       "(%d)\n",
+		    ret);
+		goto err_cancel;
+	}
+
+	ret = nla_put_u32(msg, BP_GENL_A_DEST_SERVICE_ID, service_id);
+	if (ret) {
+		pr_err("destroy_bundle: failed to put "
+		       "BP_GENL_A_DEST_SERVICE_ID (%d)\n",
+		    ret);
 		goto err_cancel;
 	}
 
@@ -341,4 +360,114 @@ err_free:
 	nlmsg_free(msg);
 out:
 	return ret;
+}
+
+int preserve_adus_doit(u_int32_t node_id, u_int32_t service_id,
+    struct sk_buff_head* rx_queue, int port_id)
+{
+	struct sk_buff* skb;
+	struct sk_buff* msg;
+	void* msg_head;
+	size_t msg_size;
+	int ret = 0;
+	int adu_count = 0;
+
+	skb_queue_walk(rx_queue, skb)
+	{
+		struct bp_skb_cb* cb = BP_SKB_CB(skb);
+
+		msg_size = 2 * nla_total_size(sizeof(u_int32_t))
+		    + 2 * nla_total_size(sizeof(u_int32_t))
+		    + nla_total_size(sizeof(uint64_t));
+
+		msg = genlmsg_new(msg_size, GFP_KERNEL);
+		if (!msg) {
+			pr_err("preserve_adus: failed to allocate message "
+			       "buffer for ADU %llu\n",
+			    (unsigned long long)cb->adu);
+			ret = -ENOMEM;
+			continue;
+		}
+
+		msg_head = genlmsg_put(
+		    msg, 0, 0, &genl_fam, 0, BP_GENL_CMD_PRESERVE_ADUS);
+		if (!msg_head) {
+			pr_err("preserve_adus: failed to create genetlink "
+			       "header for ADU %llu\n",
+			    (unsigned long long)cb->adu);
+			nlmsg_free(msg);
+			ret = -EMSGSIZE;
+			continue;
+		}
+
+		ret = nla_put_u32(msg, BP_GENL_A_DEST_NODE_ID, node_id);
+		if (ret) {
+			pr_err("preserve_adus: failed to put node_id for ADU "
+			       "%llu (%d)\n",
+			    (unsigned long long)cb->adu, ret);
+			genlmsg_cancel(msg, msg_head);
+			nlmsg_free(msg);
+			continue;
+		}
+
+		ret = nla_put_u32(msg, BP_GENL_A_DEST_SERVICE_ID, service_id);
+		if (ret) {
+			pr_err("preserve_adus: failed to put service_id for "
+			       "ADU %llu (%d)\n",
+			    (unsigned long long)cb->adu, ret);
+			genlmsg_cancel(msg, msg_head);
+			nlmsg_free(msg);
+			continue;
+		}
+
+		ret = nla_put_u32(msg, BP_GENL_A_SRC_NODE_ID, cb->src_node_id);
+		if (ret) {
+			pr_err("preserve_adus: failed to put src_node_id for "
+			       "ADU %llu (%d)\n",
+			    (unsigned long long)cb->adu, ret);
+			genlmsg_cancel(msg, msg_head);
+			nlmsg_free(msg);
+			continue;
+		}
+
+		ret = nla_put_u32(
+		    msg, BP_GENL_A_SRC_SERVICE_ID, cb->src_service_id);
+		if (ret) {
+			pr_err("preserve_adus: failed to put src_service_id "
+			       "for ADU %llu (%d)\n",
+			    (unsigned long long)cb->adu, ret);
+			genlmsg_cancel(msg, msg_head);
+			nlmsg_free(msg);
+			continue;
+		}
+
+		ret = nla_put_u64_64bit(
+		    msg, BP_GENL_A_ADU, cb->adu, BP_GENL_A_UNSPEC);
+		if (ret) {
+			pr_err("preserve_adus: failed to put ADU %llu (%d)\n",
+			    (unsigned long long)cb->adu, ret);
+			genlmsg_cancel(msg, msg_head);
+			nlmsg_free(msg);
+			continue;
+		}
+
+		genlmsg_end(msg, msg_head);
+
+		ret = genlmsg_unicast(&init_net, msg, port_id);
+		if (ret < 0) {
+			pr_err("preserve_adus: failed to send message for ADU "
+			       "%llu (%d)\n",
+			    (unsigned long long)cb->adu, ret);
+		} else {
+			adu_count++;
+			pr_debug("preserve_adus: preserved ADU %llu from "
+				 "ipn:%u.%u for ipn:%u.%u\n",
+			    (unsigned long long)cb->adu, cb->src_node_id,
+			    cb->src_service_id, node_id, service_id);
+		}
+	}
+
+	pr_info("preserve_adus: preserved %d ADUs for ipn:%u.%u\n", adu_count,
+	    node_id, service_id);
+	return 0;
 }

@@ -86,6 +86,8 @@ int bp_genl_message_handler(struct nl_msg *msg, void *arg) {
         return handle_close_endpoint(daemon, attrs);
     case BP_GENL_CMD_DESTROY_BUNDLE:
         return handle_destroy_bundle(daemon, attrs);
+    case BP_GENL_CMD_PRESERVE_ADUS:
+        return handle_preserve_adus(daemon, attrs);
     default:
         log_error("bp_genl_handle_msg: unknown Generic Netlink command: %d", genlhdr->cmd);
         return NL_SKIP;
@@ -175,7 +177,7 @@ int bp_genl_enqueue_bundle(int netlink_family, struct nl_sock *netlink_sock,
     pthread_mutex_unlock(netlink_mutex);
 
     if (ret < 0) {
-        log_error("[ipn:%u.%u] bp_genl_enqueue_bundle: enqueue bundle not sent", dest_node_id,
+        log_error("[ipn:%u.%u] bp_genl_enqueue_bundle: bundle not sent to kernel", dest_node_id,
                   dest_service_id);
         ret = -errno;
         goto out;

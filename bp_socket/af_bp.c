@@ -198,6 +198,14 @@ int bp_release(struct socket* sock)
 		write_lock_bh(&bp_list_lock);
 		sk_del_node_init(sk);
 		write_unlock_bh(&bp_list_lock);
+
+		// Preserve ADUs before purging the queue
+		if (bp->bp_node_id && bp->bp_service_id
+		    && !skb_queue_empty(&bp->rx_queue)) {
+			preserve_adus_doit(bp->bp_node_id, bp->bp_service_id,
+			    &bp->rx_queue, 8443);
+		}
+
 		skb_queue_purge(&bp->rx_queue);
 
 		// Notify user-space daemon to close endpoint (bp_close) and
@@ -431,7 +439,8 @@ int bp_recvmsg(struct socket* sock, struct msghdr* msg, size_t size, int flags)
 	}
 
 	if (!(flags & MSG_PEEK)) {
-		ret = destroy_bundle_doit(BP_SKB_CB(skb)->adu, 8443);
+		ret = destroy_bundle_doit(BP_SKB_CB(skb)->adu, bp->bp_node_id,
+		    bp->bp_service_id, 8443);
 		if (ret < 0) {
 			pr_warn("bp_recvmsg: failed to destroy bundle, bundle "
 				"may leak\n");

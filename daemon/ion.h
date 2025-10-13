@@ -61,6 +61,7 @@ int ion_open_endpoint(u_int32_t node_id, u_int32_t service_id, struct nl_sock *n
                       pthread_mutex_t *netlink_mutex, int netlink_family);
 int ion_close_endpoint(u_int32_t node_id, u_int32_t service_id);
 int ion_destroy_bundle(Object adu);
+int get_payload_from_adu(uint64_t adu, void **payload_out, size_t *payload_size_out);
 void *ion_receive_thread(void *arg);
 void *ion_send_thread(void *arg);
 

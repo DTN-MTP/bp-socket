@@ -30,8 +30,14 @@ int handle_open_endpoint(Daemon *daemon, struct nlattr **attrs) {
     ret = ion_open_endpoint(node_id, service_id, daemon->genl_bp_sock, &daemon->netlink_mutex,
                             daemon->genl_bp_family_id);
     if (ret == 0) {
-        log_info("[ipn:%u.%u] Endpoint opened: spawning receiver and sender threads", node_id,
-                 service_id);
+        log_info("[ipn:%u.%u] Endpoint opened successfully", node_id, service_id);
+
+        int restored_count =
+            endpoint_registry_restore_adus(node_id, service_id, daemon->genl_bp_sock,
+                                           &daemon->netlink_mutex, daemon->genl_bp_family_id);
+        if (restored_count > 0) {
+            log_info("[ipn:%u.%u] Restored %d preserved ADUs", node_id, service_id, restored_count);
+        }
     } else {
         log_error("handle_open_endpoint: failed to open endpoint ipn:%u.%u (error %d)", node_id,
                   service_id, ret);
@@ -110,13 +116,17 @@ int handle_destroy_bundle(Daemon *daemon, struct nlattr **attrs) {
     (void)daemon;
     uint64_t adu;
     int ret = 0;
+    u_int32_t node_id, service_id;
 
-    if (!attrs[BP_GENL_A_ADU]) {
-        log_error("handle_destroy_bundle: missing ADU attribute in DESTROY_BUNDLE command");
+    if (!attrs[BP_GENL_A_ADU] || !attrs[BP_GENL_A_DEST_NODE_ID] ||
+        !attrs[BP_GENL_A_DEST_SERVICE_ID]) {
+        log_error("handle_destroy_bundle: missing attribute(s)");
         return -EINVAL;
     }
 
     adu = nla_get_u64(attrs[BP_GENL_A_ADU]);
+    node_id = nla_get_u32(attrs[BP_GENL_A_DEST_NODE_ID]);
+    service_id = nla_get_u32(attrs[BP_GENL_A_DEST_SERVICE_ID]);
 
     ret = ion_destroy_bundle((Object)adu);
     if (ret < 0) {
@@ -124,7 +134,41 @@ int handle_destroy_bundle(Daemon *daemon, struct nlattr **attrs) {
         return ret;
     }
 
-    log_info("Bundle consumed: successfully destroyed ADU %llu", (unsigned long long)adu);
+    log_info("[ipn:%u.%u] Bundle consumed: successfully destroyed ADU %llu", node_id, service_id,
+             (unsigned long long)adu);
+
+    return 0;
+}
+
+int handle_preserve_adus(Daemon *daemon, struct nlattr **attrs) {
+    (void)daemon;
+    u_int32_t node_id, service_id;
+    u_int32_t src_node_id, src_service_id;
+    uint64_t adu;
+    int ret = 0;
+
+    if (!attrs[BP_GENL_A_DEST_NODE_ID] || !attrs[BP_GENL_A_DEST_SERVICE_ID] ||
+        !attrs[BP_GENL_A_SRC_NODE_ID] || !attrs[BP_GENL_A_SRC_SERVICE_ID] ||
+        !attrs[BP_GENL_A_ADU]) {
+        log_error("handle_preserve_adus: missing required attributes");
+        return -EINVAL;
+    }
+
+    node_id = nla_get_u32(attrs[BP_GENL_A_DEST_NODE_ID]);
+    service_id = nla_get_u32(attrs[BP_GENL_A_DEST_SERVICE_ID]);
+    src_node_id = nla_get_u32(attrs[BP_GENL_A_SRC_NODE_ID]);
+    src_service_id = nla_get_u32(attrs[BP_GENL_A_SRC_SERVICE_ID]);
+    adu = nla_get_u64(attrs[BP_GENL_A_ADU]);
+
+    ret = endpoint_registry_preserve_adu(node_id, service_id, src_node_id, src_service_id, adu);
+    if (ret < 0) {
+        log_error("handle_preserve_adus: failed to preserve ADU %llu for ipn:%u.%u (error: %d)",
+                  (unsigned long long)adu, node_id, service_id, ret);
+        return ret;
+    }
+
+    log_info("[ipn:%u.%u] preserved ADU %llu from ipn:%u.%u", node_id, service_id,
+             (unsigned long long)adu, src_node_id, src_service_id);
 
     return 0;
 }

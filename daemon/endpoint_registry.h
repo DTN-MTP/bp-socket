@@ -1,6 +1,7 @@
 #ifndef ENDPOINT_REGISTRY_H
 #define ENDPOINT_REGISTRY_H
 
+#include <netlink/netlink.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -32,11 +33,30 @@ struct send_queue_item {
     struct send_queue_item *next;
 };
 
+struct preserved_adu {
+    uint32_t src_node_id;
+    uint32_t src_service_id;
+    uint64_t adu;
+    struct preserved_adu *next;
+};
+
+struct preserved_endpoint {
+    uint32_t node_id;
+    uint32_t service_id;
+    struct preserved_adu *adu_list;
+    struct preserved_endpoint *next;
+};
+
 int endpoint_registry_add(struct endpoint_ctx *ctx);
 struct endpoint_ctx *endpoint_registry_get(uint32_t node_id, uint32_t service_id);
 int endpoint_registry_remove(uint32_t node_id, uint32_t service_id);
 bool endpoint_registry_exists(uint32_t node_id, uint32_t service_id);
 int endpoint_registry_enqueue_send(uint32_t node_id, uint32_t service_id, const char *dest_eid,
                                    const void *payload, size_t payload_size, uint32_t flags);
+int endpoint_registry_preserve_adu(uint32_t node_id, uint32_t service_id, uint32_t src_node_id,
+                                   uint32_t src_service_id, uint64_t adu);
+int endpoint_registry_restore_adus(uint32_t node_id, uint32_t service_id,
+                                   struct nl_sock *netlink_sock, pthread_mutex_t *netlink_mutex,
+                                   int netlink_family);
 
 #endif

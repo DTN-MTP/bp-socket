@@ -15,5 +15,6 @@ int handle_open_endpoint(Daemon *daemon, struct nlattr **attrs);
 int handle_close_endpoint(Daemon *daemon, struct nlattr **attrs);
 int handle_send_bundle(Daemon *daemon, struct nlattr **attrs);
 int handle_destroy_bundle(Daemon *daemon, struct nlattr **attrs);
+int handle_preserve_adus(Daemon *daemon, struct nlattr **attrs);
 
 #endif

@@ -394,3 +394,62 @@ out:
     free(args);
     return NULL;
 }
+
+int get_payload_from_adu(uint64_t adu, void **payload_out, size_t *payload_size_out) {
+    void *payload = NULL;
+    size_t payload_size = 0;
+    ZcoReader reader;
+
+    if (!payload_out || !payload_size_out) {
+        log_error("get_payload_from_adu: invalid parameters");
+        return -EINVAL;
+    }
+
+    *payload_out = NULL;
+    *payload_size_out = 0;
+
+    if (pthread_mutex_lock(&sdrmutex) != 0) {
+        log_error("get_payload_from_adu: Failed to lock SDR mutex.");
+        return -EAGAIN;
+    }
+
+    if (sdr_begin_xn(sdr) == 0) {
+        log_error("get_payload_from_adu: sdr_begin_xn failed.");
+        pthread_mutex_unlock(&sdrmutex);
+        return -EIO;
+    }
+
+    payload_size = (size_t)zco_source_data_length(sdr, adu);
+    if (payload_size == 0) {
+        log_warn("get_payload_from_adu: ADU %llu has no payload", (unsigned long long)adu);
+        sdr_end_xn(sdr);
+        pthread_mutex_unlock(&sdrmutex);
+        return 0; // No payload, but not an error
+    }
+
+    payload = malloc(payload_size);
+    if (!payload) {
+        log_error("get_payload_from_adu: Failed to allocate memory for payload.");
+        sdr_end_xn(sdr);
+        pthread_mutex_unlock(&sdrmutex);
+        return -ENOMEM;
+    }
+
+    zco_start_receiving(adu, &reader);
+    if (zco_receive_source(sdr, &reader, (vast)payload_size, payload) < 0) {
+        log_error("get_payload_from_adu: zco_receive_source failed for ADU %llu",
+                  (unsigned long long)adu);
+        free(payload);
+        sdr_end_xn(sdr);
+        pthread_mutex_unlock(&sdrmutex);
+        return -EIO;
+    }
+
+    sdr_end_xn(sdr);
+    pthread_mutex_unlock(&sdrmutex);
+
+    *payload_out = payload;
+    *payload_size_out = payload_size;
+
+    return 0;
+}
