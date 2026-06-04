@@ -3,20 +3,12 @@
 
 #include "bp.h"
 #include <event2/event.h>
-#include <netlink/socket.h>
 #include <pthread.h>
 
 typedef struct Daemon {
-    struct nl_sock *genl_bp_sock;
-    pthread_mutex_t netlink_mutex;
-    const char *genl_bp_family_name;
-    int genl_bp_family_id;
-    unsigned int nl_pid;
-
     struct event_base *base;
     struct event *event_on_sigpipe;
     struct event *event_on_sigint;
-    struct event *event_on_nl_sock;
 } Daemon;
 
 void on_sigint(evutil_socket_t fd, short what, void *arg);

@@ -1,8 +1,8 @@
 #include "ion.h"
 #include "../include/bp_socket.h"
-#include "bp_genl.h"
 #include "endpoint_registry.h"
 #include "log.h"
+#include "unix_ipc.h"
 #include "sdr.h"
 #include <bp.h>
 #include <errno.h>
@@ -21,8 +21,7 @@ static int make_eid(char *buf, size_t bufsize, u_int32_t node_id, u_int32_t serv
     return 0;
 }
 
-int ion_open_endpoint(u_int32_t node_id, u_int32_t service_id, struct nl_sock *netlink_sock,
-                      pthread_mutex_t *netlink_mutex, int netlink_family) {
+int ion_open_endpoint(u_int32_t node_id, u_int32_t service_id) {
     struct ion_recv_args *recv_args;
     struct ion_send_args *send_args;
     struct endpoint_ctx *ctx;
@@ -78,9 +77,6 @@ int ion_open_endpoint(u_int32_t node_id, u_int32_t service_id, struct nl_sock *n
         free(ctx);
         return -ENOMEM;
     }
-    recv_args->netlink_sock = netlink_sock;
-    recv_args->netlink_mutex = netlink_mutex;
-    recv_args->netlink_family = netlink_family;
     recv_args->ctx = ctx;
 
     if (pthread_create(&ctx->recv_thread, NULL, ion_receive_thread, recv_args) != 0) {
@@ -374,11 +370,10 @@ void *ion_receive_thread(void *arg) {
             continue;
         }
 
-        err = bp_genl_enqueue_bundle(args->netlink_family, args->netlink_sock, args->netlink_mutex,
-                                     payload, payload_size, src_node_id, src_service_id,
-                                     dest_node_id, dest_service_id, dlv.adu);
+        err = unix_ipc_send_bundle(payload, payload_size, src_node_id, src_service_id, dest_node_id,
+                                   dest_service_id, dlv.adu);
         if (err < 0) {
-            log_error("[ipn:%u.%u] bp_genl_enqueue_bundle: failed with error %d", dest_node_id,
+            log_error("[ipn:%u.%u] unix_ipc_send_bundle: failed with error %d", dest_node_id,
                       dest_service_id, err);
         } else {
             log_info("[ipn:%u.%u] Inbound bundle: source=ipn:%u.%u, payload_size=%zu bytes",

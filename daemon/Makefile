@@ -1,14 +1,11 @@
 CC := gcc
 CFLAGS := -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wformat=2 -Wvla -fstack-protector-strong -D_FORTIFY_SOURCE=3 -fPIE -g -Wno-deprecated-declarations
 LDFLAGS := -Wl,-z,relro,-z,now -pie -lpthread -lbp -lici -lm \
-	$(shell pkg-config --libs libevent libnl-genl-3.0)
-
-INCLUDES := $(shell pkg-config --cflags libnl-3.0)
-
+    $(shell pkg-config --libs libevent)
+INCLUDES := -I../include
 EXEC := bp_daemon
 SOURCES := $(wildcard *.c)
 OBJECTS := $(SOURCES:.c=.o)
-
 SRC_FILES := $(wildcard *.c *.h)
 
 .PHONY: all release clean format install

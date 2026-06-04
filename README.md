@@ -217,8 +217,7 @@ ionstart -I ./host.rc
 cd /bp-socket/
 make
 
-# c) Insert the bp.ko file and run the userspace daemon:
-insmod /bp-socket/bp_socket/bp.ko
+# c) Run the userspace daemon:
 /bp-socket/daemon/bp_daemon
 ```
 
@@ -251,7 +250,7 @@ python3 tools/aap2/aap2_receive.py --agentid 2 --socket ./ud3tn.aap2.socket.2
 # SSH into ion-node before
 cd /bp-socket
 gcc -o sender sender.c
-./sender 20 2
+LD_PRELOAD=/bp-socket/bp_socket/bp_interceptor.so ./sender 20 2
 ```
 
 </details>
@@ -265,7 +264,7 @@ gcc -o sender sender.c
 # SSH into ion-node before
 cd /bp-socket
 gcc -o receiver receiver.c
-./receiver 10 2
+LD_PRELOAD=/bp-socket/bp_socket/bp_interceptor.so ./receiver 10 2
 ```
 
 </details>

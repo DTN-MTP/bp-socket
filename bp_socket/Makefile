@@ -1,28 +1,14 @@
-bp-objs := bp_genl.o af_bp.o bp_module.o
-obj-m += bp.o
-
-KDIR := /lib/modules/$(shell uname -r)/build
-PWD := $(shell pwd)
-
+CC := gcc
+CFLAGS := -Wall -Wextra -fPIC -g -I../include
+LDFLAGS := -shared -ldl
 SRC_FILES := $(wildcard *.c *.h)
 
-.PHONY: all clean sparse install
+.PHONY: all clean format
 
-all:
-	$(MAKE) -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
+all: bp_interceptor.so
+
+bp_interceptor.so: interceptor.c fd_table.c
+	$(CC) $(CFLAGS) -o bp_interceptor.so interceptor.c fd_table.c $(LDFLAGS)
 
 clean:
-	$(MAKE) -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
-
-sparse:
-	$(MAKE) -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules C=1 CHECK=sparse
-
-format:
-	clang-format -i --style=file $(SRC_FILES)
-
-install: all
-	@echo "Installing kernel module..."
-	install -d /lib/modules/$(shell uname -r)/extra
-	install -m 644 bp.ko /lib/modules/$(shell uname -r)/extra/
-	depmod -a
-	@echo "Kernel module installed. Use 'modprobe bp' to load it."
+	rm -f bp_interceptor.so *.o
